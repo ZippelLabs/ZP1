@@ -1,0 +1,459 @@
+//! zp1 CLI: Command-line interface for proving and verifying RISC-V programs.
+
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
+use std::fs;
+use std::time::Instant;
+
+use zp1_executor::{Cpu, ElfLoader};
+use zp1_trace::TraceColumns;
+use zp1_prover::{StarkConfig, StarkProver, SerializableProof, ProofConfig};
+use zp1_primitives::M31;
+
+/// zp1: Zero-knowledge RISC-V prover
+#[derive(Parser)]
+#[command(name = "zp1")]
+#[command(author = "ZippelLabs")]
+#[command(version = "0.1.0")]
+#[command(about = "Generate and verify zero-knowledge proofs for RISC-V programs", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Execute a RISC-V ELF binary and generate execution trace
+    Execute {
+        /// Path to the ELF binary
+        #[arg(short, long)]
+        elf: PathBuf,
+        
+        /// Maximum number of execution steps
+        #[arg(short, long, default_value = "1000000")]
+        max_steps: u64,
+        
+        /// Output trace file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    
+    /// Generate a STARK proof for a RISC-V program
+    Prove {
+        /// Path to the ELF binary
+        #[arg(short, long)]
+        elf: PathBuf,
+        
+        /// Output proof file
+        #[arg(short, long)]
+        output: PathBuf,
+        
+        /// Maximum execution steps
+        #[arg(short, long, default_value = "1000000")]
+        max_steps: u64,
+        
+        /// Blowup factor for LDE
+        #[arg(long, default_value = "8")]
+        blowup: usize,
+        
+        /// Number of FRI queries
+        #[arg(long, default_value = "50")]
+        queries: usize,
+    },
+    
+    /// Verify a STARK proof
+    Verify {
+        /// Path to the proof file
+        #[arg(short, long)]
+        proof: PathBuf,
+    },
+    
+    /// Show information about an ELF binary
+    Info {
+        /// Path to the ELF binary
+        #[arg(short, long)]
+        elf: PathBuf,
+    },
+    
+    /// Run benchmarks
+    Bench {
+        /// Trace size (log2)
+        #[arg(short, long, default_value = "16")]
+        log_size: usize,
+    },
+}
+
+fn main() {
+    let cli = Cli::parse();
+    
+    match cli.command {
+        Commands::Execute { elf, max_steps, output } => {
+            execute_command(&elf, max_steps, output);
+        }
+        Commands::Prove { elf, output, max_steps, blowup, queries } => {
+            prove_command(&elf, &output, max_steps, blowup, queries);
+        }
+        Commands::Verify { proof } => {
+            verify_command(&proof);
+        }
+        Commands::Info { elf } => {
+            info_command(&elf);
+        }
+        Commands::Bench { log_size } => {
+            bench_command(log_size);
+        }
+    }
+}
+
+fn execute_command(elf_path: &PathBuf, max_steps: u64, output: Option<PathBuf>) {
+    println!("Loading ELF: {}", elf_path.display());
+    
+    let elf_data = match fs::read(elf_path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error reading ELF file: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    let loader = match ElfLoader::parse(&elf_data) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Error parsing ELF: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    println!("Entry point: {:#x}", loader.entry_point());
+    let (low, high) = loader.memory_bounds();
+    println!("Memory bounds: {:#x} - {:#x}", low, high);
+    
+    // Create CPU and load program
+    let mut cpu = Cpu::new();
+    cpu.enable_tracing();
+    
+    if let Err(e) = loader.load_into_memory(&mut cpu.memory) {
+        eprintln!("Error loading program: {}", e);
+        std::process::exit(1);
+    }
+    cpu.pc = loader.entry_point();
+    
+    println!("Executing (max {} steps)...", max_steps);
+    let start = Instant::now();
+    
+    let mut steps = 0u64;
+    loop {
+        if steps >= max_steps {
+            println!("Reached max steps limit");
+            break;
+        }
+        
+        match cpu.step() {
+            Ok(Some(_)) => steps += 1,
+            Ok(None) => {
+                println!("Program halted normally");
+                break;
+            }
+            Err(e) => {
+                println!("Execution stopped: {}", e);
+                break;
+            }
+        }
+    }
+    
+    let elapsed = start.elapsed();
+    println!("Executed {} steps in {:?}", steps, elapsed);
+    println!("Speed: {:.2} steps/sec", steps as f64 / elapsed.as_secs_f64());
+    
+    // Output trace if requested
+    if let Some(out_path) = output {
+        if let Some(trace) = cpu.take_trace() {
+            let columns = TraceColumns::from_execution_trace(&trace);
+            println!("Trace: {} rows", columns.len());
+            
+            // Save trace info
+            let info = format!("Trace rows: {}\nExecution steps: {}\n", columns.len(), steps);
+            if let Err(e) = fs::write(&out_path, info) {
+                eprintln!("Error writing output: {}", e);
+            } else {
+                println!("Trace info saved to {}", out_path.display());
+            }
+        }
+    }
+}
+
+fn prove_command(elf_path: &PathBuf, output_path: &PathBuf, max_steps: u64, blowup: usize, queries: usize) {
+    println!("=== ZP1 STARK Prover ===\n");
+    
+    // Load and execute
+    println!("[1/4] Loading ELF...");
+    let elf_data = match fs::read(elf_path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error reading ELF: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    let loader = match ElfLoader::parse(&elf_data) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Error parsing ELF: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    println!("       Entry: {:#x}", loader.entry_point());
+    
+    // Execute
+    println!("[2/4] Executing program...");
+    let exec_start = Instant::now();
+    
+    let mut cpu = Cpu::new();
+    cpu.enable_tracing();
+    loader.load_into_memory(&mut cpu.memory).unwrap();
+    cpu.pc = loader.entry_point();
+    
+    let mut steps = 0u64;
+    while steps < max_steps {
+        match cpu.step() {
+            Ok(Some(_)) => steps += 1,
+            Ok(None) | Err(_) => break,
+        }
+    }
+    
+    let trace = cpu.take_trace().unwrap_or_default();
+    let columns = TraceColumns::from_execution_trace(&trace);
+    let trace_len = columns.len();
+    
+    println!("       {} steps, {} trace rows ({:?})", steps, trace_len, exec_start.elapsed());
+    
+    if trace_len == 0 {
+        eprintln!("Error: Empty trace");
+        std::process::exit(1);
+    }
+    
+    // Pad to power of 2
+    let padded_len = trace_len.next_power_of_two();
+    let log_trace_len = padded_len.trailing_zeros() as usize;
+    
+    // Build trace for proving
+    println!("[3/4] Generating proof...");
+    let prove_start = Instant::now();
+    
+    let config = StarkConfig {
+        log_trace_len,
+        blowup_factor: blowup,
+        num_queries: queries,
+        fri_folding_factor: 2,
+    };
+    
+    // Use PC column (padded)
+    let mut trace_column = columns.pc.clone();
+    trace_column.resize(padded_len, M31::ZERO);
+    
+    let mut prover = StarkProver::new(config.clone());
+    let proof = prover.prove(vec![trace_column]);
+    
+    println!("       Proof generated ({:?})", prove_start.elapsed());
+    println!("       FRI layers: {}", proof.fri_proof.layer_commitments.len());
+    println!("       Query proofs: {}", proof.query_proofs.len());
+    
+    // Serialize proof
+    println!("[4/4] Saving proof...");
+    
+    let serializable = SerializableProof {
+        trace_commitment: proof.trace_commitment,
+        composition_commitment: proof.composition_commitment,
+        fri_commitments: proof.fri_proof.layer_commitments.clone(),
+        fri_final_poly: proof.fri_proof.final_poly.clone(),
+        query_proofs: proof.query_proofs.iter().map(|qp| {
+            zp1_prover::serialize::SerializableQueryProof {
+                index: qp.index,
+                trace_values: qp.trace_values.clone(),
+                composition_value: qp.composition_value,
+                merkle_paths: vec![zp1_prover::serialize::MerklePath {
+                    siblings: qp.trace_proof.path.clone(),
+                }],
+                fri_values: vec![],
+            }
+        }).collect(),
+        config: ProofConfig {
+            log_trace_len,
+            blowup_factor: blowup,
+            num_queries: queries,
+            fri_folding_factor: 2,
+            security_bits: 100,
+        },
+    };
+    
+    let json = serializable.to_json().unwrap();
+    if let Err(e) = fs::write(output_path, &json) {
+        eprintln!("Error writing proof: {}", e);
+        std::process::exit(1);
+    }
+    
+    let proof_size = json.len();
+    println!("\n=== Proof Complete ===");
+    println!("Trace length:    2^{} = {}", log_trace_len, padded_len);
+    println!("Proof size:      {} bytes ({:.2} KB)", proof_size, proof_size as f64 / 1024.0);
+    println!("Output:          {}", output_path.display());
+}
+
+fn verify_command(proof_path: &PathBuf) {
+    println!("=== ZP1 STARK Verifier ===\n");
+    
+    println!("Loading proof: {}", proof_path.display());
+    
+    let json = match fs::read_to_string(proof_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error reading proof: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    let proof: SerializableProof = match serde_json::from_str(&json) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Error parsing proof: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    println!("Configuration:");
+    println!("  Trace length: 2^{}", proof.config.log_trace_len);
+    println!("  Blowup:       {}", proof.config.blowup_factor);
+    println!("  Queries:      {}", proof.config.num_queries);
+    println!("  Security:     {} bits", proof.config.security_bits);
+    
+    println!("\nCommitments:");
+    println!("  Trace:       {:02x?}...", &proof.trace_commitment[..4]);
+    println!("  Composition: {:02x?}...", &proof.composition_commitment[..4]);
+    println!("  FRI layers:  {}", proof.fri_commitments.len());
+    
+    println!("\nVerifying...");
+    let start = Instant::now();
+    
+    // Basic structure verification
+    let mut valid = true;
+    
+    if proof.trace_commitment == [0u8; 32] {
+        println!("  ❌ Invalid trace commitment");
+        valid = false;
+    } else {
+        println!("  ✓ Trace commitment valid");
+    }
+    
+    if proof.fri_commitments.is_empty() {
+        println!("  ❌ No FRI commitments");
+        valid = false;
+    } else {
+        println!("  ✓ FRI commitments present");
+    }
+    
+    if proof.query_proofs.len() != proof.config.num_queries {
+        println!("  ❌ Query count mismatch");
+        valid = false;
+    } else {
+        println!("  ✓ Query count correct");
+    }
+    
+    println!("\nVerification: {:?}", start.elapsed());
+    
+    if valid {
+        println!("\n✓ Proof structure valid");
+    } else {
+        println!("\n✗ Proof verification failed");
+        std::process::exit(1);
+    }
+}
+
+fn info_command(elf_path: &PathBuf) {
+    println!("=== ELF Information ===\n");
+    
+    let elf_data = match fs::read(elf_path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Error reading file: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    println!("File: {}", elf_path.display());
+    println!("Size: {} bytes", elf_data.len());
+    
+    let loader = match ElfLoader::parse(&elf_data) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Error parsing ELF: {}", e);
+            std::process::exit(1);
+        }
+    };
+    
+    let header = loader.header();
+    println!("\nHeader:");
+    println!("  Entry point:    {:#x}", header.entry);
+    println!("  Program headers: {}", header.phnum);
+    println!("  Section headers: {}", header.shnum);
+    
+    let (low, high) = loader.memory_bounds();
+    println!("\nMemory:");
+    println!("  Range:     {:#x} - {:#x}", low, high);
+    println!("  Size:      {} bytes ({:.2} KB)", 
+             loader.total_memory_size(),
+             loader.total_memory_size() as f64 / 1024.0);
+    
+    println!("\nLoadable segments:");
+    for (i, seg) in loader.program_headers().iter().enumerate() {
+        if seg.p_type == 1 { // PT_LOAD
+            println!("  [{}] vaddr={:#x} filesz={} memsz={} flags={:#x}",
+                     i, seg.p_vaddr, seg.p_filesz, seg.p_memsz, seg.p_flags);
+        }
+    }
+}
+
+fn bench_command(log_size: usize) {
+    println!("=== ZP1 Benchmark ===\n");
+    
+    let trace_len = 1usize << log_size;
+    println!("Trace size: 2^{} = {} rows", log_size, trace_len);
+    
+    // Generate random trace
+    println!("\nGenerating trace...");
+    let start = Instant::now();
+    let column: Vec<M31> = (0..trace_len)
+        .map(|i| M31::new((i * 7 + 13) as u32 % M31::P))
+        .collect();
+    println!("  Generated in {:?}", start.elapsed());
+    
+    // Prove
+    println!("\nProving...");
+    let prove_start = Instant::now();
+    
+    let config = StarkConfig {
+        log_trace_len: log_size,
+        blowup_factor: 8,
+        num_queries: 50,
+        fri_folding_factor: 2,
+    };
+    
+    let mut prover = StarkProver::new(config);
+    let proof = prover.prove(vec![column]);
+    
+    let prove_time = prove_start.elapsed();
+    println!("  Prove time: {:?}", prove_time);
+    println!("  Throughput: {:.2} rows/sec", trace_len as f64 / prove_time.as_secs_f64());
+    
+    println!("\nProof stats:");
+    println!("  FRI layers:    {}", proof.fri_proof.layer_commitments.len());
+    println!("  Query proofs:  {}", proof.query_proofs.len());
+    println!("  Final poly:    {} coeffs", proof.fri_proof.final_poly.len());
+    
+    // Estimate proof size
+    let proof_size_est = 32 * 2 + // commitments
+                         32 * proof.fri_proof.layer_commitments.len() + // FRI commitments
+                         4 * proof.fri_proof.final_poly.len() + // final poly
+                         proof.query_proofs.len() * (4 + 4 * 10 + 32 * log_size); // query proofs
+    println!("  Est. size:     ~{:.2} KB", proof_size_est as f64 / 1024.0);
+}

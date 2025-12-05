@@ -27,4 +27,7 @@ pub enum ExecutorError {
 
     #[error("Program halted normally")]
     Halted,
+
+    #[error("Invalid ELF file: {0}")]
+    InvalidElf(String),
 }

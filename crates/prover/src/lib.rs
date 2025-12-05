@@ -7,6 +7,8 @@ pub mod commitment;
 pub mod fri;
 pub mod lde;
 pub mod logup;
+pub mod parallel;
+pub mod serialize;
 pub mod stark;
 
 pub use commitment::MerkleTree;
@@ -14,3 +16,5 @@ pub use channel::ProverChannel;
 pub use stark::{StarkConfig, StarkProver, StarkProof, QueryProof};
 pub use lde::{LdeDomain, TraceLDE};
 pub use logup::{LookupTable, LogUpProver, RangeCheck, PermutationArgument};
+pub use parallel::{ParallelConfig, parallel_lde, parallel_merkle_tree, parallel_fri_fold};
+pub use serialize::{SerializableProof, VerificationKey, ProofConfig};

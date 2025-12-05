@@ -1,0 +1,19 @@
+[package]
+name = "zp1-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zp1"
+path = "src/main.rs"
+
+[dependencies]
+zp1-primitives = { workspace = true }
+zp1-executor = { workspace = true }
+zp1-trace = { workspace = true }
+zp1-prover = { workspace = true }
+zp1-verifier = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -12,6 +12,7 @@ sha2 = { workspace = true }
 blake3 = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
 
