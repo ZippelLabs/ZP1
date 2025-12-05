@@ -1,39 +1,154 @@
-# zk RISC-V STARK Prover (RV32IM)
+# zp1 - RISC-V STARK Prover
 
-A RISC-V RV32IM proving system that generates zero-knowledge STARK proofs of program execution, with DEEP FRI, lookup/RAM arguments, delegated precompiles (BLAKE2s/BLAKE3, U256 bigint), recursive Rust verifier, and CPU/GPU provers.
+A zero-knowledge proving system for RISC-V RV32IM program execution using STARK/FRI proofs over the Mersenne31 field.
 
-**Key capabilities**
-- DEEP STARK/FRI arguments for efficient proof generation.
-- Lookup/RAM/Delegation arguments for memory consistency and precompile calls.
-- AIR constraints for RISC-V CPU and delegation circuits (BLAKE2s/Blake3, U256 BigInt operations).
-- Custom Rust verifier program for proof recursion.
-- CPU and GPU prover implementations for performance optimization.
+## Features
+
+- **STARK Proofs**: DEEP STARK with FRI commitment scheme
+- **Circle FFT**: Uses circle group over M31 (order 2^32) for FFT-friendly polynomial operations
+- **Mersenne31 Field**: Fast prime field (p = 2^31 - 1) with QM31 quartic extension
+- **RV32IM Executor**: Full RISC-V RV32IM instruction set with ELF loader
+- **Memory Consistency**: LogUp-based memory argument for provable memory access
+- **Lookup Arguments**: LogUp protocol for efficient range checks and table lookups
+- **Recursive Proofs**: Proof aggregation and compression for scalability
+- **GPU Backend**: Trait-based GPU acceleration with CPU fallback
+- **Parallel Proving**: Rayon-based multi-threaded prover
+
+## Project Structure
+
+```
+crates/
+├── primitives/   # M31/QM31 fields, Circle FFT, Merkle trees, FRI
+├── executor/     # RV32IM CPU emulator with tracing, ELF loader
+├── trace/        # Execution trace to column conversion
+├── air/          # AIR constraints for CPU, memory, lookups
+├── prover/       # STARK prover, LDE, GPU backend, recursion
+├── verifier/     # Proof verification, DEEP queries
+├── cli/          # Command-line interface
+└── tests/        # Integration tests
+```
+
+## Installation
+
+```bash
+git clone https://github.com/this-vishalsingh/zp1.git
+cd zp1
+cargo build --release
+```
+
+## Usage
+
+### CLI Commands
+
+```bash
+# Execute a RISC-V ELF and generate trace
+zp1 execute program.elf --output trace.json
+
+# Generate a STARK proof
+zp1 prove program.elf --output proof.json
+
+# Verify a proof
+zp1 verify proof.json
+
+# Show ELF information
+zp1 info program.elf
+
+# Run benchmarks
+zp1 bench
+```
+
+### Library Usage
+
+```rust
+use zp1_executor::Cpu;
+use zp1_prover::{StarkProver, StarkConfig};
+use zp1_verifier::StarkVerifier;
+
+// Execute program
+let mut cpu = Cpu::new();
+cpu.enable_tracing();
+cpu.load_program(0x1000, &program_bytes)?;
+while cpu.step()?.is_some() {}
+let trace = cpu.take_trace()?;
+
+// Generate proof
+let config = StarkConfig::default();
+let mut prover = StarkProver::new(config);
+let proof = prover.prove(trace_columns);
+
+// Verify proof
+let verifier = StarkVerifier::new(config);
+assert!(verifier.verify(&proof));
+```
+
+## Architecture
+
+### Field Arithmetic
+- **M31**: Mersenne prime field (p = 2^31 - 1) with SIMD-friendly operations
+- **QM31**: Degree-4 extension for FRI security (irreducible: x^4 + x + 2)
+
+### Proof System
+- **Circle STARK**: Uses circle group for evaluation domain (|C| = 2^32)
+- **DEEP Method**: Out-of-domain sampling for constraint verification
+- **FRI**: Fast Reed-Solomon IOPP with configurable folding factor
+- **LogUp**: Logarithmic derivative lookup argument for memory/tables
+
+### Constraint System
+- 37 AIR constraints for RV32IM instructions
+- Memory read/write consistency via sorted permutation
+- Range checks for 8/16/32-bit values
+
+## Testing
+
+```bash
+# Run all tests
+cargo test --workspace
+
+# Run with output
+cargo test --workspace -- --nocapture
+
+# Run specific crate tests
+cargo test -p zp1-prover
+```
+
+## Benchmarks
+
+```bash
+# Run criterion benchmarks
+cargo bench
+
+# Quick CLI benchmark
+cargo run --release -p zp1-cli -- bench
+```
 
 ## Status
-- Planning and architecture phase. Implementation to follow.
 
-## Proposed repository layout
-- `docs/` — design notes, protocol specs, and param docs.
-- `executor/` — RV32IM execution engine and trace emitter.
-- `trace/` — trace builder/normalizer, padding/alignment, column serialization.
-- `air/` — AIR definitions for CPU, memory, delegation gadgets, lookup wiring.
-- `prover/` — STARK prover (commitment, DEEP FRI, lookup/RAM arguments); CPU backend.
-- `prover-gpu/` — GPU acceleration (NTT/LDE, Merkle hashing, optional constraint kernels).
-- `verifier/` — Rust verifier for base proofs and recursion.
-- `recursion/` — recursive verifier circuits and SNARK wrapper integrations.
-- `delegation/` — gadgets for BLAKE2s/BLAKE3, U256 bigint, other precompiles.
-- `ffi/` — language bindings or host integrations.
-- `scripts/` — tooling for building, benchmarking, fixtures.
-- `bench/` — benchmark programs and reporting harness.
-- `tests/` — end-to-end and algebraic tests (golden traces, lookup/RAM soundness).
+✅ **Implemented**:
+- Mersenne31 field with QM31 extension
+- Circle FFT and polynomial operations
+- STARK prover with FRI commitment
+- RV32IM executor with full instruction set
+- ELF loader for standard binaries
+- Merkle tree commitments (Blake3)
+- LogUp lookup arguments
+- Memory consistency proofs
+- DEEP STARK verifier
+- Recursive proof aggregation
+- GPU backend traits (CPU fallback)
+- CLI with execute/prove/verify commands
 
-## Immediate next steps
-1) Decide field/parameters for the first milestone (likely Goldilocks, blowup/FRI rounds).
-2) Implement the RV32IM executor + trace emission (golden correctness against ISA reference).
-3) Define column layout and AIR for CPU + memory permutation + delegated precompiles.
-4) Build minimal prover skeleton (commitment, LDE, constraint eval, DEEP FRI) on CPU.
-5) Stand up Rust verifier for the minimal proof; add harness for recursive embedding.
-6) Add GPU acceleration for NTT/Merkle once CPU path is stable.
-7) Add delegated gadgets incrementally (BLAKE2s first, then BLAKE3, then U256 limb ops).
+📋 **Planned**:
+- Metal/CUDA GPU kernels
+- BLAKE2s/BLAKE3 delegation gadgets
+- U256 bigint precompiles
+- SNARK wrapper for succinct proofs
 
-See `docs/architecture.md` for the detailed protocol sketch.
+## License
+
+MIT
+
+## References
+
+- [Circle STARKs](https://eprint.iacr.org/2024/278) - Polygon/StarkWare
+- [LogUp](https://eprint.iacr.org/2022/1530) - Lookup argument
+- [RISC-V ISA](https://riscv.org/specifications/) - RV32IM specification
