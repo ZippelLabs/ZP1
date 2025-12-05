@@ -426,6 +426,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "zp1-tests"
+version = "0.1.0"
+dependencies = [
+ "rand",
+ "zp1-air",
+ "zp1-executor",
+ "zp1-primitives",
+ "zp1-prover",
+ "zp1-trace",
+ "zp1-verifier",
+]
+
+[[package]]
 name = "zp1-trace"
 version = "0.1.0"
 dependencies = [
