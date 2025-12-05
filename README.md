@@ -2,6 +2,13 @@
 
 A RISC-V RV32IM proving system that generates zero-knowledge STARK proofs of program execution, with DEEP FRI, lookup/RAM arguments, delegated precompiles (BLAKE2s/BLAKE3, U256 bigint), recursive Rust verifier, and CPU/GPU provers.
 
+**Key capabilities**
+- DEEP STARK/FRI arguments for efficient proof generation.
+- Lookup/RAM/Delegation arguments for memory consistency and precompile calls.
+- AIR constraints for RISC-V CPU and delegation circuits (BLAKE2s/Blake3, U256 BigInt operations).
+- Custom Rust verifier program for proof recursion.
+- CPU and GPU prover implementations for performance optimization.
+
 ## Status
 - Planning and architecture phase. Implementation to follow.
 

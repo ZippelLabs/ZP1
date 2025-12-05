@@ -1,10 +1,11 @@
 # zk RISC-V Prover Architecture (STARK/FRI)
 
 ## Scope
-- RISC-V RV32IM execution tracing and proving using DEEP STARK/FRI.
-- Lookup/RAM arguments for memory consistency and delegated precompiles (BLAKE2s/BLAKE3, U256 bigint ops).
-- Recursion-ready proofs, with a custom Rust verifier and SNARK compression target.
-- CPU and GPU prover backends for performance.
+- DEEP STARK/FRI arguments for efficient proof generation.
+- Lookup/RAM/Delegation arguments for memory consistency and precompile calls.
+- AIR constraints for RISC-V CPU and delegation circuits (BLAKE2s/Blake3, U256 BigInt operations).
+- Custom Rust verifier program for proof recursion.
+- CPU and GPU prover implementations for performance optimization.
 
 ## System overview
 1) **Compile + execute**: Build RISC-V binaries (Rust or other) -> run in an instrumented RV32IM executor -> capture deterministic trace (registers, pc, memory ops, syscalls/precompiles).
