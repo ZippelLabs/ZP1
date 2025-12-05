@@ -200,7 +200,7 @@ impl ConstraintEvaluator {
     /// Evaluate x0 = 0 constraint.
     /// rd_val must be 0 when rd = 0.
     #[inline]
-    pub fn x0_zero(row: &CpuTraceRow) -> M31 {
+    pub fn x0_zero(_row: &CpuTraceRow) -> M31 {
         // Use inverse selector: (1 - rd * rd_inv) when rd = 0
         // Simplified: rd_val * (rd == 0 selector)
         // We use: rd is 0-31, so rd = 0 can be checked via range

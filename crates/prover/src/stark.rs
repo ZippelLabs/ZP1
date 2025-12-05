@@ -13,7 +13,7 @@ use crate::{
     channel::ProverChannel,
     commitment::{MerkleTree, MerkleProof},
     lde::TraceLDE,
-    fri::{FriConfig, FriProver, FriProof, FriLayer},
+    fri::{FriConfig, FriProver, FriProof},
 };
 use zp1_primitives::{M31, QM31};
 

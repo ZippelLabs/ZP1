@@ -79,7 +79,7 @@ impl DecodedInstr {
             }
             opcode::JALR | opcode::LOAD | opcode::OP_IMM | opcode::SYSTEM => {
                 // I-type: imm[11:0]
-                let imm = ((bits as i32) >> 20);
+                let imm = (bits as i32) >> 20;
                 (imm, InstrFormat::I)
             }
             opcode::BRANCH => {

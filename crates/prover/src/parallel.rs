@@ -51,7 +51,7 @@ fn extend_column(column: &[M31], blowup: usize) -> Vec<M31> {
     // Fill intermediate values using linear interpolation (placeholder)
     for i in 0..n {
         let start_idx = i * blowup;
-        let end_idx = ((i + 1) % n) * blowup;
+        let _end_idx = ((i + 1) % n) * blowup;
         let start_val = column[i];
         let end_val = column[(i + 1) % n];
         

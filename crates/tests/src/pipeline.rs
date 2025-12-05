@@ -4,8 +4,12 @@
 
 use zp1_executor::Cpu;
 use zp1_trace::TraceColumns;
-use zp1_prover::{StarkConfig, StarkProver};
+
+// M31, StarkConfig, and StarkProver are used in tests (via use super::*)
+#[allow(unused_imports)]
 use zp1_primitives::M31;
+#[allow(unused_imports)]
+use zp1_prover::{StarkConfig, StarkProver};
 
 /// Execute a program and return trace columns.
 pub fn execute_and_trace(program: &[u8], max_steps: usize) -> TraceColumns {
@@ -32,6 +36,7 @@ pub fn execute_and_trace(program: &[u8], max_steps: usize) -> TraceColumns {
 }
 
 /// Convert u32 instructions to bytes.
+#[allow(dead_code)]
 fn instructions_to_bytes(instrs: &[u32]) -> Vec<u8> {
     instrs.iter().flat_map(|i| i.to_le_bytes()).collect()
 }

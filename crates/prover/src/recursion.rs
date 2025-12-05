@@ -6,9 +6,10 @@
 //! - Parallelism: Proving chunks independently then aggregating
 //! - Compression: Reducing multiple proofs to one
 
-use zp1_primitives::{M31, QM31};
+#![allow(dead_code)]
+
+use zp1_primitives::M31;
 use crate::stark::StarkProof;
-use crate::fri::FriProof;
 
 // M31 modulus
 const M31_MODULUS: u32 = (1 << 31) - 1;

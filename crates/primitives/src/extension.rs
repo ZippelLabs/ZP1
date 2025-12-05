@@ -228,6 +228,7 @@ impl QM31 {
     }
 
     /// Compute adjugate matrix first row (gives inverse coefficients when divided by det).
+    #[allow(unused_variables)]
     fn compute_adjugate(a0: M31, a1: M31, a2: M31, a3: M31) -> (M31, M31, M31, M31) {
         let w4 = W4;
 
@@ -237,10 +238,10 @@ impl QM31 {
         let m30 = a3; let m31 = a2;      let m32 = a1;      let m33 = a0;
 
         // Adjugate first row = cofactors of first column
-        let adj0 = Self::det3(m11, m12, m13, m21, m22, m23, m31, m32, m33);
-        let adj1 = -Self::det3(m01, m02, m03, m21, m22, m23, m31, m32, m33);
-        let adj2 = Self::det3(m01, m02, m03, m11, m12, m13, m31, m32, m33);
-        let adj3 = -Self::det3(m01, m02, m03, m11, m12, m13, m21, m22, m23);
+        let _adj0 = Self::det3(m11, m12, m13, m21, m22, m23, m31, m32, m33);
+        let _adj1 = -Self::det3(m01, m02, m03, m21, m22, m23, m31, m32, m33);
+        let _adj2 = Self::det3(m01, m02, m03, m11, m12, m13, m31, m32, m33);
+        let _adj3 = -Self::det3(m01, m02, m03, m11, m12, m13, m21, m22, m23);
 
         // Wait, adjugate transpose: adj[i][j] = (-1)^(i+j) * M[j][i]
         // For the inverse, we need the first row of adj^T, which is the first column of adj.

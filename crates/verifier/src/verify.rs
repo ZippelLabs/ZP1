@@ -346,7 +346,7 @@ impl Verifier {
 
         let mut current_index = query.index;
 
-        for (layer_idx, (layer_proof, &alpha)) in 
+        for (layer_idx, (layer_proof, &_alpha)) in 
             query.layer_proofs.iter().zip(alphas.iter()).enumerate() 
         {
             // Verify Merkle proof for sibling value

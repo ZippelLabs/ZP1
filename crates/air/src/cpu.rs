@@ -11,7 +11,7 @@ impl CpuAir {
     /// Evaluate the x0 = 0 constraint.
     /// If rd = 0, then rd_val must be 0.
     #[inline]
-    pub fn x0_zero_constraint(rd: M31, rd_val: M31) -> M31 {
+    pub fn x0_zero_constraint(_rd: M31, _rd_val: M31) -> M31 {
         // rd * rd_val = 0 when rd = 0
         // But we need: if rd = 0 then rd_val = 0
         // Constraint: rd_val * (1 - rd * something) ... 

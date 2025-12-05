@@ -195,7 +195,7 @@ impl TraceColumns {
         }
 
         // Pad with copies of the last row (or zeros for most columns)
-        let pad_count = target - len;
+        let _pad_count = target - len;
 
         // For simplicity, pad with zeros (will need proper padding logic for constraints)
         self.clk.resize(target, M31::ZERO);

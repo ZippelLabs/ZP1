@@ -1,5 +1,7 @@
 //! GPU backend trait and implementations.
 
+#![allow(dead_code)]
+
 use std::sync::Arc;
 use crate::gpu::DeviceType;
 
@@ -218,10 +220,6 @@ impl GpuBackend for CpuBackend {
     }
     
     fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
-        // Use the parallel CPU implementation
-        use crate::parallel::parallel_lde;
-        use zp1_primitives::field::M31;
-        
         let n = 1 << log_n;
         if values.len() != n {
             return Err(GpuError::InvalidBufferSize {
@@ -281,8 +279,6 @@ impl GpuBackend for CpuBackend {
     }
     
     fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
-        use crate::parallel::parallel_merkle_layer;
-        
         if leaves.is_empty() {
             return Ok(vec![]);
         }

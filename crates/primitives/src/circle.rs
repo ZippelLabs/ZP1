@@ -215,9 +215,10 @@ impl CircleDomain {
 /// Circle FFT - transform between coefficient and evaluation representations.
 /// Uses the Twin-Coset approach where evaluation points come in (x, y) and (x, -y) pairs.
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct CircleFFT {
     domain: CircleDomain,
-    /// Twiddle factors for the FFT butterfly operations.
+    /// Twiddle factors for the FFT butterfly operations (precomputed for optimization).
     twiddles: Vec<M31>,
     /// Inverse twiddle factors.
     inv_twiddles: Vec<M31>,
