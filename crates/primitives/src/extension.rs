@@ -47,6 +47,30 @@ impl QM31 {
         Self { c0, c1, c2, c3 }
     }
 
+    /// Get the c0 coefficient.
+    #[inline]
+    pub const fn c0(&self) -> M31 {
+        self.c0
+    }
+
+    /// Get the c1 coefficient.
+    #[inline]
+    pub const fn c1(&self) -> M31 {
+        self.c1
+    }
+
+    /// Get the c2 coefficient.
+    #[inline]
+    pub const fn c2(&self) -> M31 {
+        self.c2
+    }
+
+    /// Get the c3 coefficient.
+    #[inline]
+    pub const fn c3(&self) -> M31 {
+        self.c3
+    }
+
     /// Embed an M31 element into QM31.
     #[inline]
     pub const fn from_base(val: M31) -> Self {

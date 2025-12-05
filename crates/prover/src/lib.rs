@@ -6,6 +6,9 @@ pub mod channel;
 pub mod commitment;
 pub mod fri;
 pub mod lde;
+pub mod stark;
 
 pub use commitment::MerkleTree;
 pub use channel::ProverChannel;
+pub use stark::{StarkConfig, StarkProver, StarkProof, QueryProof};
+pub use lde::{LdeDomain, TraceLDE};

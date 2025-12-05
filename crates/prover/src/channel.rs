@@ -13,11 +13,13 @@ pub struct ProverChannel {
 
 impl ProverChannel {
     /// Create a new prover channel.
-    pub fn new() -> Self {
-        Self {
+    pub fn new(domain_separator: &[u8]) -> Self {
+        let mut ch = Self {
             hasher: Sha256::new(),
             transcript: Vec::new(),
-        }
+        };
+        ch.absorb(domain_separator);
+        ch
     }
 
     /// Absorb bytes into the transcript.
@@ -56,6 +58,11 @@ impl ProverChannel {
         QM31::new(c0, c1, c2, c3)
     }
 
+    /// Alias for squeeze_extension_challenge.
+    pub fn squeeze_qm31(&mut self) -> QM31 {
+        self.squeeze_extension_challenge()
+    }
+
     /// Squeeze n query indices in range [0, domain_size).
     pub fn squeeze_query_indices(&mut self, n: usize, domain_size: usize) -> Vec<usize> {
         let mut indices = Vec::with_capacity(n);
@@ -85,7 +92,7 @@ impl ProverChannel {
 
 impl Default for ProverChannel {
     fn default() -> Self {
-        Self::new()
+        Self::new(b"zp1-default")
     }
 }
 
@@ -95,8 +102,8 @@ mod tests {
 
     #[test]
     fn test_channel_deterministic() {
-        let mut ch1 = ProverChannel::new();
-        let mut ch2 = ProverChannel::new();
+        let mut ch1 = ProverChannel::new(b"test");
+        let mut ch2 = ProverChannel::new(b"test");
 
         ch1.absorb(b"test data");
         ch2.absorb(b"test data");
@@ -109,7 +116,7 @@ mod tests {
 
     #[test]
     fn test_query_indices() {
-        let mut ch = ProverChannel::new();
+        let mut ch = ProverChannel::new(b"test");
         ch.absorb(b"seed");
 
         let indices = ch.squeeze_query_indices(10, 1024);

@@ -211,7 +211,7 @@ mod tests {
         let prover = FriProver::new(config);
         let evals: Vec<M31> = (0..16).map(|i| M31::new(i)).collect();
 
-        let mut channel = ProverChannel::new();
+        let mut channel = ProverChannel::new(b"test");
         let (layers, proof) = prover.commit(evals, &mut channel);
 
         assert!(!layers.is_empty());
