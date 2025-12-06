@@ -58,15 +58,20 @@
 - **File**: `crates/air/src/memory.rs`
 - **Result**: Memory consistency can now be verified
 
-#### ⏳ Still TODO (1/5 Critical):
-
 ##### CVE-5: No Public Input Binding
-- **Status**: ❌ TODO
-- **Impact**: Proofs can be replayed with different public inputs
-- **Required**: 
-  - Add public inputs parameter to prover/verifier
-  - Absorb before trace commitment
-- **Estimated**: 1 hour
+- **Status**: ✅ FIXED
+- **Impact**: Prevented proof replay attacks
+- **Fix**: 
+  - Added `public_inputs: &[M31]` parameter to `StarkProver::prove()` and `Verifier::verify()`
+  - Phase 0 now absorbs public inputs into transcript before trace commitment
+  - Updated all call sites (tests + CLI)
+- **Files**:
+  - `crates/prover/src/stark.rs` (prove signature + Phase 0)
+  - `crates/verifier/src/verify.rs` (verify signature + Phase 0)
+  - `crates/tests/src/pipeline.rs` (4 test updates)
+  - `crates/cli/src/main.rs` (2 CLI updates)
+- **Commit**: `f90cf34`
+- **Result**: Proofs now cryptographically bound to public inputs. All 344 tests passing.
 
 ---
 
@@ -78,14 +83,14 @@
 |------|--------|------|-------|
 | Fiat-Shamir transcript fix | ✅ | 1h | Complete |
 | Domain separator | ✅ | 0.5h | Complete |
-| Public input binding | ⏳ | - | Next task |
+| Public input binding | ✅ | 1h | Complete - all tests passing |
 | x0 = 0 enforcement | ✅ | 0.5h | Complete |
 | RAM permutation | ✅ | 3h | LogUp constraint done |
 | Load/store constraints | 🟡 | 2h | Stubs added, need trace columns |
-| Bitwise operations | ⏳ | - | TODO |
+| Bitwise operations | ⏳ | - | TODO - next priority |
 | DEEP quotient verification | ⏳ | - | TODO |
 
-**Progress**: 6/8 tasks (4.5/26 hours = 17%)
+**Progress**: 7/8 tasks (5.5/26 hours = 21%)
 
 ### Overall System Status
 
@@ -94,22 +99,16 @@
 | **Primitives** | 95% | 95% | - |
 | **Executor** | 100% | 100% | - |
 | **AIR** | 29% | 35% | +6% ⬆️ |
-| **Prover** | 75% | 75% | - |
-| **Verifier** | 40% | 55% | +15% ⬆️ |
-| **Overall** | 68% | 72% | +4% ⬆️ |
+| **Prover** | 75% | 80% | +5% ⬆️ |
+| **Verifier** | 40% | 60% | +20% ⬆️ |
+| **Overall** | 68% | 74% | +6% ⬆️ |
 
 ---
 
 ## 🎯 Next Steps (Immediate)
 
 ### Priority 1 (Next Session):
-1. **Add public input binding** (1 hour)
-   - Add `public_inputs` parameter to `StarkProver::prove()`
-   - Absorb public inputs before trace commitment
-   - Update verifier to absorb public inputs
-   - Add test cases
-
-2. **Implement bitwise operations** (4 hours)
+1. **Implement bitwise operations** (4 hours)
    - Add bit decomposition columns to CpuTraceRow
    - Implement AND/OR/XOR constraints via bit operations
    - Add constraint: `bit * (bit - 1) = 0` for each bit
