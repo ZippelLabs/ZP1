@@ -1,30 +1,88 @@
-//! RV32IM CPU implementation.
+//! RV32IM CPU executor with execution trace generation.
+//!
+//! This module provides a complete, deterministic implementation of the RISC-V
+//! RV32IM instruction set architecture, optimized for zero-knowledge proof generation.
 //!
 //! # Complete RV32IM Implementation
 //!
-//! This module implements the full RV32IM instruction set:
-//! - **RV32I Base Integer ISA**: All 40 base instructions
-//! - **M Extension**: Integer multiply/divide (MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU)
+//! All 47 instructions are fully implemented:
+//!
+//! ## RV32I Base (40 instructions)
+//!
+//! **Arithmetic** (10): ADD, SUB, ADDI, LUI, AUIPC, AND, OR, XOR, ANDI, ORI, XORI
+//! **Shifts** (6): SLL, SRL, SRA, SLLI, SRLI, SRAI
+//! **Comparisons** (6): SLT, SLTU, SLTI, SLTIU
+//! **Branches** (6): BEQ, BNE, BLT, BGE, BLTU, BGEU
+//! **Jumps** (2): JAL, JALR
+//! **Loads** (5): LB, LH, LW, LBU, LHU
+//! **Stores** (3): SB, SH, SW
+//! **System** (2): ECALL, EBREAK
+//!
+//! ## M Extension (8 instructions)
+//!
+//! **Multiply** (4): MUL, MULH, MULHSU, MULHU
+//! **Divide/Remainder** (4): DIV, DIVU, REM, REMU
 //!
 //! # Execution Model
 //!
 //! The CPU operates in **machine mode only** (M-mode, highest RISC-V privilege level).
+//! This simplified model enables efficient proof generation.
 //!
-//! ## Constraints
+//! ## Key Properties
 //!
-//! - Standard fetch-decode-execute loop enforced at each cycle
-//! - **FENCE/FENCE.I**: Treated as NOP (no-op) since we have single-threaded deterministic execution
-//! - **CSR instructions**: Not supported - cause InvalidInstruction error
-//! - **ECALL/EBREAK**: Cause execution to halt with error (can be used for program termination)
-//! - **No unaligned memory accesses**:
-//!   - Full-word (32-bit) accesses must be 4-byte aligned
-//!   - Half-word (16-bit) accesses must be 2-byte aligned
+//! - **Deterministic execution**: Same input always produces same trace
+//! - **Single-threaded**: No concurrency or interrupts
+//! - **No MMU**: Direct physical memory access
+//! - **No CSRs**: Control/Status Registers not supported
+//! - **Strict alignment**: Word (4B) and halfword (2B) aligned only
+//!
+//! ## Supported Operations
+//!
+//! - ✅ Standard fetch-decode-execute loop
+//! - ✅ All integer arithmetic and logic operations
+//! - ✅ All memory load/store operations
+//! - ✅ All control flow (branches, jumps)
+//! - ✅ All M-extension multiply/divide operations
+//! - ✅ Register x0 hardwired to zero
+//! - ✅ Execution trace generation for proving
+//!
+//! ## Unsupported/Simplified
+//!
+//! - ❌ **CSR instructions**: Cause `InvalidInstruction` error
+//! - ❌ **ECALL/EBREAK**: Halt execution (used for program termination)
+//! - ⚠️ **FENCE/FENCE.I**: Treated as NOP (single-threaded, no cache)
+//! - ❌ **Unaligned access**: Causes `UnalignedAccess` error
+//! - ❌ **Interrupts/traps**: Not supported (deterministic model)
 //!
 //! ## Why These Restrictions?
 //!
 //! The proving system requires deterministic, fully constrained execution.
-//! System calls, interrupts, and misaligned accesses would require complex
-//! trap handling circuits that significantly increase proof complexity.
+//! System calls, interrupts, privilege levels, and complex trap handling
+//! would require additional AIR constraints that significantly increase
+//! proof complexity and generation time.
+//!
+//! # Trace Generation
+//!
+//! The CPU can optionally generate an execution trace suitable for STARK proving:
+//!
+//! ```rust,ignore
+//! use zp1_executor::Cpu;
+//!
+//! let mut cpu = Cpu::new();
+//! cpu.enable_tracing();
+//! cpu.load_program(0x1000, &program_bytes)?;
+//!
+//! // Execute program
+//! while cpu.step()?.is_some() {
+//!     // Each step records: pc, registers, memory ops, instruction
+//! }
+//!
+//! // Get complete execution trace
+//! let trace = cpu.take_trace().unwrap();
+//! ```
+//!
+//! The trace captures every CPU state transition and is used by the prover
+//! to generate a zero-knowledge proof of correct execution.
 
 use crate::decode::{opcode, DecodedInstr, branch_funct3, load_funct3, store_funct3, 
                     op_imm_funct3, op_funct3, system_funct3, funct7};
