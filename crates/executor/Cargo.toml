@@ -6,8 +6,10 @@ license.workspace = true
 
 [dependencies]
 zp1-primitives = { workspace = true }
+zp1-delegation = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+hex = "0.4"

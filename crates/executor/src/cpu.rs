@@ -512,7 +512,56 @@ impl Cpu {
                                 // ECALL - Environment Call
                                 flags.is_ecall = true;
                                 let syscall_id = self.get_reg(17); // a7 register
-                                return Err(ExecutorError::Ecall { pc: self.pc, syscall_id });
+                                
+                                // Handle specific supported syscalls
+                                match syscall_id {
+                                    0x1000 => {
+                                        // Keccak256 syscall
+                                        // a0 = input pointer
+                                        // a1 = input length
+                                        // a2 = output pointer (32 bytes)
+                                        let input_ptr = self.get_reg(10);
+                                        let input_len = self.get_reg(11);
+                                        let output_ptr = self.get_reg(12);
+                                        
+                                        // Validate pointers
+                                        if !self.memory.is_valid_range(input_ptr, input_len) {
+                                            return Err(ExecutorError::OutOfBounds { addr: input_ptr });
+                                        }
+                                        if !self.memory.is_valid_range(output_ptr, 32) {
+                                            return Err(ExecutorError::OutOfBounds { addr: output_ptr });
+                                        }
+                                        
+                                        // Extract input data
+                                        let input_data = self.memory.slice(input_ptr, input_len as usize)
+                                            .ok_or(ExecutorError::OutOfBounds { addr: input_ptr })?;
+                                        
+                                        // Compute Keccak256 hash using delegation module
+                                        let hash = zp1_delegation::keccak::keccak256(input_data);
+                                        
+                                        // Write output to memory
+                                        self.memory.write_slice(output_ptr, &hash)?;
+                                        
+                                        // Record the delegation in trace
+                                        mem_op = MemOp::Keccak256 {
+                                            input_ptr,
+                                            input_len,
+                                            output_ptr,
+                                        };
+                                        
+                                        // Return success (a0 = 0)
+                                        self.set_reg(10, 0);
+                                        next_pc = self.pc.wrapping_add(4);
+                                    }
+                                    93 => {
+                                        // Linux exit syscall - allow this for program termination
+                                        return Err(ExecutorError::Ecall { pc: self.pc, syscall_id });
+                                    }
+                                    _ => {
+                                        // Unsupported syscall
+                                        return Err(ExecutorError::Ecall { pc: self.pc, syscall_id });
+                                    }
+                                }
                             }
                             0x001 => {
                                 // EBREAK - Breakpoint

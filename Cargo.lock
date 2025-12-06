@@ -5283,9 +5283,10 @@ dependencies = [
 name = "zp1-delegation"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "rand 0.8.5",
  "serde",
- "zp1-air",
+ "tiny-keccak",
  "zp1-primitives",
 ]
 
@@ -5317,9 +5318,11 @@ dependencies = [
 name = "zp1-executor"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "rand 0.8.5",
  "serde",
  "thiserror 1.0.69",
+ "zp1-delegation",
  "zp1-primitives",
 ]
 

@@ -13,9 +13,9 @@ pub enum ExecutorError {
     // These errors indicate operations that cannot be proven in our constraint system.
     // Programs containing these will fail during proving.
 
-    /// ECALL instruction encountered - not supported in machine-mode-only execution.
+    /// ECALL instruction encountered - only specific syscalls are supported (0x1000=Keccak256, 93=exit).
     /// This is an unprovable trap that will cause prover failure.
-    #[error("Unprovable trap: ECALL (syscall {syscall_id}) at pc={pc:#x} - system calls not supported")]
+    #[error("Unprovable trap: ECALL (syscall {syscall_id}) at pc={pc:#x} - unsupported system call")]
     Ecall { pc: u32, syscall_id: u32 },
 
     /// EBREAK instruction encountered - debug breakpoints not supported.

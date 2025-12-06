@@ -6,8 +6,9 @@ license.workspace = true
 
 [dependencies]
 zp1-primitives = { workspace = true }
-zp1-air = { workspace = true }
 serde = { workspace = true }
+tiny-keccak = { version = "2.0", features = ["keccak"] }
 
 [dev-dependencies]
 rand = { workspace = true }
+hex = "0.4"

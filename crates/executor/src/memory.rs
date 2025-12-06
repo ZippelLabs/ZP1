@@ -175,6 +175,35 @@ impl Memory {
             None
         }
     }
+
+    /// Write a slice of bytes to memory.
+    pub fn write_slice(&mut self, start: u32, data: &[u8]) -> Result<(), ExecutorError> {
+        let s = start as usize;
+        if s + data.len() > self.data.len() {
+            return Err(ExecutorError::OutOfBounds { addr: start });
+        }
+        self.data[s..s + data.len()].copy_from_slice(data);
+        Ok(())
+    }
+
+    /// Check if an address range is valid.
+    pub fn is_valid_range(&self, start: u32, len: u32) -> bool {
+        let s = start as usize;
+        let l = len as usize;
+        s.checked_add(l).map_or(false, |end| end <= self.data.len())
+    }
+
+    /// Alias for read_u8 for backwards compatibility.
+    #[inline]
+    pub fn read_byte(&self, addr: u32) -> Result<u8, ExecutorError> {
+        self.read_u8(addr)
+    }
+
+    /// Alias for write_u8 for backwards compatibility.
+    #[inline]
+    pub fn write_byte(&mut self, addr: u32, val: u8) -> Result<(), ExecutorError> {
+        self.write_u8(addr, val)
+    }
 }
 
 impl Default for Memory {

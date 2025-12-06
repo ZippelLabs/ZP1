@@ -459,6 +459,9 @@ impl TraceColumns {
                 },
                 zp1_executor::trace::MemOp::StoreHalf { addr, value } => (addr, value as u32, 0, 0, 0, 0, 0, 0, 1, 0, 0),
                 zp1_executor::trace::MemOp::StoreWord { addr, value } => (addr, value, 0, 0, 0, 0, 0, 0, 0, 1, 0),
+                // Keccak256 is delegated to a separate circuit, so it doesn't appear in the main trace
+                // The delegation link is recorded separately
+                zp1_executor::trace::MemOp::Keccak256 { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             };
             cols.mem_addr_lo.push(M31::new(mem_addr & 0xFFFF));
             cols.mem_addr_hi.push(M31::new((mem_addr >> 16) & 0xFFFF));

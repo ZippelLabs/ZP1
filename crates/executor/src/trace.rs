@@ -23,6 +23,8 @@ pub enum MemOp {
     StoreHalf { addr: u32, value: u16 },
     /// Store word (SW).
     StoreWord { addr: u32, value: u32 },
+    /// Keccak256 hash operation (delegated to specialized circuit).
+    Keccak256 { input_ptr: u32, input_len: u32, output_ptr: u32 },
 }
 
 /// Flags indicating instruction class for AIR constraint selection.
