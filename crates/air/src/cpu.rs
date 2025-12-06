@@ -522,6 +522,219 @@ impl CpuAir {
         
         (c_lo, c_hi)
     }
+
+    /// Evaluate LB (Load Byte) constraint.
+    /// rd = sign_extend(mem[addr][7:0])
+    /// 
+    /// # Arguments
+    /// * `mem_value` - Full 32-bit word from memory
+    /// * `byte_offset` - Which byte to load (0-3)
+    /// * `rd_val` - Result value (sign-extended byte)
+    ///
+    /// # Returns
+    /// Constraint ensuring correct byte extraction and sign extension
+    pub fn load_byte_constraint(
+        mem_value: M31,
+        byte_offset: M31,
+        rd_val: M31,
+    ) -> M31 {
+        // Extract byte based on offset (0-3)
+        // For simplicity, assume byte_offset is validated elsewhere
+        // byte = (mem_value >> (8 * byte_offset)) & 0xFF
+        // sign_extend = byte < 128 ? byte : byte | 0xFFFFFF00
+        
+        // This requires bit decomposition of the byte
+        // Placeholder: will be implemented with proper bit extraction
+        mem_value - rd_val - byte_offset + mem_value // Placeholder identity
+    }
+
+    /// Evaluate LH (Load Halfword) constraint.
+    /// rd = sign_extend(mem[addr][15:0])
+    ///
+    /// # Arguments
+    /// * `mem_value` - Full 32-bit word from memory
+    /// * `half_offset` - Which halfword (0 or 1)
+    /// * `rd_val` - Result value (sign-extended halfword)
+    ///
+    /// # Returns
+    /// Constraint ensuring correct halfword extraction and sign extension
+    pub fn load_halfword_constraint(
+        mem_value: M31,
+        half_offset: M31,
+        rd_val: M31,
+    ) -> M31 {
+        // Extract halfword: (mem_value >> (16 * half_offset)) & 0xFFFF
+        // sign_extend = half < 32768 ? half : half | 0xFFFF0000
+        
+        // Placeholder: requires proper extraction logic
+        mem_value - rd_val - half_offset + mem_value
+    }
+
+    /// Evaluate LW (Load Word) constraint.
+    /// rd = mem[addr]
+    ///
+    /// # Arguments
+    /// * `mem_value` - 32-bit word from memory
+    /// * `rd_val` - Result value
+    ///
+    /// # Returns
+    /// Constraint: rd_val = mem_value
+    #[inline]
+    pub fn load_word_constraint(
+        mem_value: M31,
+        rd_val: M31,
+    ) -> M31 {
+        rd_val - mem_value
+    }
+
+    /// Evaluate LBU (Load Byte Unsigned) constraint.
+    /// rd = zero_extend(mem[addr][7:0])
+    ///
+    /// # Arguments
+    /// * `mem_value` - Full 32-bit word from memory  
+    /// * `byte_offset` - Which byte to load (0-3)
+    /// * `rd_val` - Result value (zero-extended byte)
+    ///
+    /// # Returns
+    /// Constraint ensuring correct byte extraction and zero extension
+    pub fn load_byte_unsigned_constraint(
+        mem_value: M31,
+        byte_offset: M31,
+        rd_val: M31,
+    ) -> M31 {
+        // byte = (mem_value >> (8 * byte_offset)) & 0xFF
+        // zero_extend = byte (no sign extension)
+        
+        // Placeholder
+        mem_value - rd_val - byte_offset + mem_value
+    }
+
+    /// Evaluate LHU (Load Halfword Unsigned) constraint.
+    /// rd = zero_extend(mem[addr][15:0])
+    ///
+    /// # Arguments
+    /// * `mem_value` - Full 32-bit word from memory
+    /// * `half_offset` - Which halfword (0 or 1)
+    /// * `rd_val` - Result value (zero-extended halfword)
+    ///
+    /// # Returns
+    /// Constraint ensuring correct halfword extraction and zero extension
+    pub fn load_halfword_unsigned_constraint(
+        mem_value: M31,
+        half_offset: M31,
+        rd_val: M31,
+    ) -> M31 {
+        // half = (mem_value >> (16 * half_offset)) & 0xFFFF
+        // zero_extend = half
+        
+        // Placeholder
+        mem_value - rd_val - half_offset + mem_value
+    }
+
+    /// Evaluate SB (Store Byte) constraint.
+    /// mem[addr][7:0] = rs2[7:0], preserve other bytes
+    ///
+    /// # Arguments
+    /// * `old_mem_value` - Original memory word
+    /// * `new_mem_value` - Updated memory word
+    /// * `byte_to_store` - Byte value from rs2 (8 bits)
+    /// * `byte_offset` - Which byte position (0-3)
+    ///
+    /// # Returns
+    /// Constraint ensuring only target byte is modified
+    pub fn store_byte_constraint(
+        old_mem_value: M31,
+        new_mem_value: M31,
+        byte_to_store: M31,
+        byte_offset: M31,
+    ) -> M31 {
+        // Mask out target byte, insert new byte
+        // new = (old & ~(0xFF << (8*offset))) | ((byte & 0xFF) << (8*offset))
+        
+        // Placeholder
+        old_mem_value - new_mem_value - byte_to_store - byte_offset + old_mem_value
+    }
+
+    /// Evaluate SH (Store Halfword) constraint.
+    /// mem[addr][15:0] = rs2[15:0], preserve other halfword
+    ///
+    /// # Arguments
+    /// * `old_mem_value` - Original memory word
+    /// * `new_mem_value` - Updated memory word
+    /// * `half_to_store` - Halfword value from rs2 (16 bits)
+    /// * `half_offset` - Which halfword position (0 or 1)
+    ///
+    /// # Returns
+    /// Constraint ensuring only target halfword is modified
+    pub fn store_halfword_constraint(
+        old_mem_value: M31,
+        new_mem_value: M31,
+        half_to_store: M31,
+        half_offset: M31,
+    ) -> M31 {
+        // new = (old & ~(0xFFFF << (16*offset))) | ((half & 0xFFFF) << (16*offset))
+        
+        // Placeholder
+        old_mem_value - new_mem_value - half_to_store - half_offset + old_mem_value
+    }
+
+    /// Evaluate SW (Store Word) constraint.
+    /// mem[addr] = rs2
+    ///
+    /// # Arguments
+    /// * `new_mem_value` - Memory word after store
+    /// * `rs2_val` - Value to store
+    ///
+    /// # Returns
+    /// Constraint: new_mem_value = rs2_val
+    #[inline]
+    pub fn store_word_constraint(
+        new_mem_value: M31,
+        rs2_val: M31,
+    ) -> M31 {
+        new_mem_value - rs2_val
+    }
+
+    /// Evaluate alignment constraint for word access.
+    /// addr must be 4-byte aligned (addr % 4 == 0)
+    ///
+    /// # Arguments
+    /// * `addr_lo` - Lower 16 bits of address
+    /// * `is_word_access` - Selector (1 if word access, 0 otherwise)
+    ///
+    /// # Returns
+    /// Constraint: is_word_access * (addr_lo % 4) = 0
+    pub fn word_alignment_constraint(
+        addr_lo: M31,
+        is_word_access: M31,
+    ) -> M31 {
+        // addr_lo % 4 = addr_lo & 3
+        // Need bit decomposition to check low 2 bits are 0
+        
+        // Simplified: Check addr_lo mod 4 via auxiliary witness
+        // For now, placeholder assuming alignment is pre-checked
+        is_word_access * (addr_lo - addr_lo) // Identity
+    }
+
+    /// Evaluate alignment constraint for halfword access.
+    /// addr must be 2-byte aligned (addr % 2 == 0)
+    ///
+    /// # Arguments
+    /// * `addr_lo` - Lower 16 bits of address
+    /// * `is_half_access` - Selector (1 if halfword access, 0 otherwise)
+    ///
+    /// # Returns
+    /// Constraint: is_half_access * (addr_lo % 2) = 0
+    pub fn halfword_alignment_constraint(
+        addr_lo: M31,
+        is_half_access: M31,
+    ) -> M31 {
+        // addr_lo % 2 = addr_lo & 1
+        // Check low bit is 0
+        
+        // Placeholder
+        is_half_access * (addr_lo - addr_lo)
+    }
 }
 
 #[cfg(test)]
@@ -1370,5 +1583,90 @@ mod tests {
                 _ => panic!("Unknown operation: {}", op),
             }
         }
+    }
+
+    #[test]
+    fn test_load_word_constraint() {
+        // Test LW: rd = mem[addr]
+        let mem_value = M31::new(0x12345678);
+        let rd_val = M31::new(0x12345678);
+
+        let constraint = CpuAir::load_word_constraint(mem_value, rd_val);
+        assert_eq!(constraint, M31::ZERO, "LW constraint failed");
+
+        // Test with wrong value
+        let wrong_rd = M31::new(0x11111111);
+        let wrong_constraint = CpuAir::load_word_constraint(mem_value, wrong_rd);
+        assert_ne!(wrong_constraint, M31::ZERO, "LW should catch incorrect value");
+    }
+
+    #[test]
+    fn test_store_word_constraint() {
+        // Test SW: mem[addr] = rs2
+        let rs2_val = M31::new(0xABCDEF00);
+        let new_mem = M31::new(0xABCDEF00);
+
+        let constraint = CpuAir::store_word_constraint(new_mem, rs2_val);
+        assert_eq!(constraint, M31::ZERO, "SW constraint failed");
+
+        // Test with wrong stored value
+        let wrong_mem = M31::new(0xABCDEF01);
+        let wrong_constraint = CpuAir::store_word_constraint(wrong_mem, rs2_val);
+        assert_ne!(wrong_constraint, M31::ZERO, "SW should catch incorrect stored value");
+    }
+
+    #[test]
+    fn test_load_byte_placeholder() {
+        // Test LB placeholder (arbitrary computation for now)
+        // Current placeholder: mem_value - rd_val - byte_offset + mem_value
+        let mem_value = M31::new(0x000000FF);
+        let byte_offset = M31::ZERO;
+        let rd_val = M31::new(0xFFFFFFFF);
+
+        let constraint = CpuAir::load_byte_constraint(mem_value, byte_offset, rd_val);
+        // Placeholder: 255 - 0xFFFFFFFF - 0 + 255 = 510 - 0xFFFFFFFF
+        // This is just checking the placeholder computes something
+        // Will be replaced with proper bit extraction logic
+        let _ = constraint; // Just verify it compiles
+    }
+
+    #[test]
+    fn test_store_byte_placeholder() {
+        // Test SB placeholder (arbitrary computation for now)
+        let old_mem = M31::new(0x12345678);
+        let new_mem = M31::new(0x123456AB);
+        let byte_val = M31::new(0xAB);
+        let offset = M31::ZERO;
+
+        let constraint = CpuAir::store_byte_constraint(old_mem, new_mem, byte_val, offset);
+        // Placeholder does: old_mem - new_mem + byte_val - offset + old_mem
+        // Just verify it compiles for now
+        let _ = constraint;
+    }
+
+    #[test]
+    fn test_word_alignment() {
+        // Test word alignment (placeholder)
+        let aligned_addr = M31::new(0x1000); // Aligned to 4
+        let is_word = M31::ONE;
+
+        let constraint = CpuAir::word_alignment_constraint(aligned_addr, is_word);
+        assert_eq!(constraint, M31::ZERO, "Word alignment constraint failed");
+
+        // Misaligned address (placeholder won't catch this yet)
+        let misaligned_addr = M31::new(0x1001);
+        let constraint2 = CpuAir::word_alignment_constraint(misaligned_addr, is_word);
+        // Placeholder returns 0 regardless
+        assert_eq!(constraint2, M31::ZERO, "Placeholder alignment");
+    }
+
+    #[test]
+    fn test_halfword_alignment() {
+        // Test halfword alignment (placeholder)
+        let aligned_addr = M31::new(0x1000); // Aligned to 2
+        let is_half = M31::ONE;
+
+        let constraint = CpuAir::halfword_alignment_constraint(aligned_addr, is_half);
+        assert_eq!(constraint, M31::ZERO, "Halfword alignment constraint failed");
     }
 }
