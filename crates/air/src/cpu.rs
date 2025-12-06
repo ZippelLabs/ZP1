@@ -190,6 +190,104 @@ impl CpuAir {
         }
         constraints
     }
+
+    /// Evaluate SLL (Shift Left Logical) constraint.
+    /// result = value << (shift_amount % 32)
+    /// 
+    /// # Arguments
+    /// * `bits_value` - Bit decomposition of input value
+    /// * `bits_result` - Bit decomposition of result
+    /// * `shift_amount` - Number of positions to shift (0-31)
+    ///
+    /// # Returns
+    /// Vector of 32 constraints enforcing correct shift
+    pub fn shift_left_logical_constraints(
+        bits_value: &[M31; 32],
+        bits_result: &[M31; 32],
+        shift_amount: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::with_capacity(32);
+        
+        // For each possible shift amount (0-31), we need to check:
+        // If shift_amount == k, then result[i] = value[i-k] for i >= k, else 0
+        // We use selector pattern: is_shift_k * (result[i] - expected[i]) = 0
+        
+        // Convert shift_amount to u32 for computation
+        // Note: In real implementation, shift_amount should be range-checked [0, 31]
+        let shift_val = shift_amount.value() % 32;
+        
+        for i in 0..32 {
+            if i < shift_val as usize {
+                // Bits shifted in from right are 0
+                constraints.push(bits_result[i]);
+            } else {
+                // Bit i of result comes from bit (i - shift) of input
+                let src_idx = i - shift_val as usize;
+                constraints.push(bits_result[i] - bits_value[src_idx]);
+            }
+        }
+        
+        constraints
+    }
+
+    /// Evaluate SRL (Shift Right Logical) constraint.
+    /// result = value >> (shift_amount % 32)
+    /// Zero-extends from left.
+    ///
+    /// # Returns
+    /// Vector of 32 constraints enforcing correct shift
+    pub fn shift_right_logical_constraints(
+        bits_value: &[M31; 32],
+        bits_result: &[M31; 32],
+        shift_amount: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::with_capacity(32);
+        
+        let shift_val = shift_amount.value() % 32;
+        
+        for i in 0..32 {
+            let src_idx = i + shift_val as usize;
+            if src_idx >= 32 {
+                // Bits shifted in from left are 0
+                constraints.push(bits_result[i]);
+            } else {
+                // Bit i of result comes from bit (i + shift) of input
+                constraints.push(bits_result[i] - bits_value[src_idx]);
+            }
+        }
+        
+        constraints
+    }
+
+    /// Evaluate SRA (Shift Right Arithmetic) constraint.
+    /// result = value >> (shift_amount % 32)
+    /// Sign-extends from left (replicates bit 31).
+    ///
+    /// # Returns
+    /// Vector of 32 constraints enforcing correct shift
+    pub fn shift_right_arithmetic_constraints(
+        bits_value: &[M31; 32],
+        bits_result: &[M31; 32],
+        shift_amount: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::with_capacity(32);
+        
+        let shift_val = shift_amount.value() % 32;
+        let sign_bit = bits_value[31]; // MSB is sign bit
+        
+        for i in 0..32 {
+            let src_idx = i + shift_val as usize;
+            if src_idx >= 32 {
+                // Bits shifted in from left are sign bit
+                constraints.push(bits_result[i] - sign_bit);
+            } else {
+                // Bit i of result comes from bit (i + shift) of input
+                constraints.push(bits_result[i] - bits_value[src_idx]);
+            }
+        }
+        
+        constraints
+    }
 }
 
 #[cfg(test)]
@@ -418,5 +516,212 @@ mod tests {
         // Should have non-zero constraints (reconstruction will fail)
         let has_nonzero = constraints.iter().any(|c| *c != M31::ZERO);
         assert!(has_nonzero, "Constraint should catch incorrect bit decomposition");
+    }
+
+    #[test]
+    fn test_shift_left_logical() {
+        // Test SLL: 0b1010 << 1 = 0b10100
+        let value = 0b1010u32;
+        let shift = 1u32;
+        let expected = value << shift;
+
+        let bits_value = u32_to_bits(value);
+        let bits_result = u32_to_bits(expected);
+        let shift_m31 = M31::new(shift);
+
+        let constraints = CpuAir::shift_left_logical_constraints(
+            &bits_value,
+            &bits_result,
+            shift_m31,
+        );
+
+        assert_eq!(constraints.len(), 32);
+        for (i, constraint) in constraints.iter().enumerate() {
+            assert_eq!(*constraint, M31::ZERO, "SLL constraint {} failed", i);
+        }
+    }
+
+    #[test]
+    fn test_shift_left_comprehensive() {
+        let test_cases = [
+            (0x00000001, 0, 0x00000001),  // No shift
+            (0x00000001, 1, 0x00000002),  // Simple shift
+            (0x00000001, 31, 0x80000000), // Shift to MSB
+            (0xFFFFFFFF, 1, 0xFFFFFFFE),  // All ones
+            (0x12345678, 4, 0x23456780),  // Nibble shift
+            (0x00000001, 32, 0x00000001), // Shift by 32 (wraps to 0)
+        ];
+
+        for (value, shift, expected) in test_cases {
+            let bits_value = u32_to_bits(value);
+            let bits_result = u32_to_bits(expected);
+            let shift_m31 = M31::new(shift);
+
+            let constraints = CpuAir::shift_left_logical_constraints(
+                &bits_value,
+                &bits_result,
+                shift_m31,
+            );
+
+            for (i, constraint) in constraints.iter().enumerate() {
+                assert_eq!(
+                    *constraint, M31::ZERO,
+                    "SLL({:#x} << {}) failed at bit {}", value, shift, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_shift_right_logical() {
+        // Test SRL: 0b1010 >> 1 = 0b0101
+        let value = 0b1010u32;
+        let shift = 1u32;
+        let expected = value >> shift;
+
+        let bits_value = u32_to_bits(value);
+        let bits_result = u32_to_bits(expected);
+        let shift_m31 = M31::new(shift);
+
+        let constraints = CpuAir::shift_right_logical_constraints(
+            &bits_value,
+            &bits_result,
+            shift_m31,
+        );
+
+        assert_eq!(constraints.len(), 32);
+        for constraint in constraints {
+            assert_eq!(constraint, M31::ZERO);
+        }
+    }
+
+    #[test]
+    fn test_shift_right_logical_comprehensive() {
+        let test_cases = [
+            (0x80000000, 0, 0x80000000),  // No shift
+            (0x80000000, 1, 0x40000000),  // Shift MSB
+            (0x80000000, 31, 0x00000001), // Shift to LSB
+            (0xFFFFFFFF, 1, 0x7FFFFFFF),  // Zero-extend from left
+            (0x12345678, 4, 0x01234567),  // Nibble shift
+            (0x80000000, 32, 0x80000000), // Shift by 32 (wraps to 0)
+        ];
+
+        for (value, shift, expected) in test_cases {
+            let bits_value = u32_to_bits(value);
+            let bits_result = u32_to_bits(expected);
+            let shift_m31 = M31::new(shift);
+
+            let constraints = CpuAir::shift_right_logical_constraints(
+                &bits_value,
+                &bits_result,
+                shift_m31,
+            );
+
+            for (i, constraint) in constraints.iter().enumerate() {
+                assert_eq!(
+                    *constraint, M31::ZERO,
+                    "SRL({:#x} >> {}) failed at bit {}", value, shift, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_shift_right_arithmetic() {
+        // Test SRA with positive number (MSB = 0)
+        let value = 0b01010u32;
+        let shift = 1u32;
+        let expected = value >> shift; // 0b00101
+
+        let bits_value = u32_to_bits(value);
+        let bits_result = u32_to_bits(expected);
+        let shift_m31 = M31::new(shift);
+
+        let constraints = CpuAir::shift_right_arithmetic_constraints(
+            &bits_value,
+            &bits_result,
+            shift_m31,
+        );
+
+        assert_eq!(constraints.len(), 32);
+        for constraint in constraints {
+            assert_eq!(constraint, M31::ZERO);
+        }
+    }
+
+    #[test]
+    fn test_shift_right_arithmetic_negative() {
+        // Test SRA with negative number (MSB = 1) - sign extension
+        let value = 0x80000000u32; // Negative in two's complement
+        let shift = 1u32;
+        let expected = 0xC0000000u32; // Sign-extended: 1100...
+
+        let bits_value = u32_to_bits(value);
+        let bits_result = u32_to_bits(expected);
+        let shift_m31 = M31::new(shift);
+
+        let constraints = CpuAir::shift_right_arithmetic_constraints(
+            &bits_value,
+            &bits_result,
+            shift_m31,
+        );
+
+        for constraint in constraints {
+            assert_eq!(constraint, M31::ZERO, "SRA sign extension failed");
+        }
+    }
+
+    #[test]
+    fn test_shift_right_arithmetic_comprehensive() {
+        let test_cases = [
+            // (value, shift, expected_sra)
+            (0x00000008, 1, 0x00000004),  // Positive: 8 >> 1 = 4
+            (0x00000008, 2, 0x00000002),  // Positive: 8 >> 2 = 2
+            (0xFFFFFFF8u32, 1, 0xFFFFFFFCu32), // Negative: -8 >> 1 = -4 (sign extend)
+            (0xFFFFFFF8u32, 2, 0xFFFFFFFEu32), // Negative: -8 >> 2 = -2 (sign extend)
+            (0x80000000u32, 31, 0xFFFFFFFFu32), // Min int >> 31 = -1 (all ones)
+            (0x7FFFFFFF, 31, 0x00000000),  // Max int >> 31 = 0
+        ];
+
+        for (value, shift, expected) in test_cases {
+            let bits_value = u32_to_bits(value);
+            let bits_result = u32_to_bits(expected);
+            let shift_m31 = M31::new(shift);
+
+            let constraints = CpuAir::shift_right_arithmetic_constraints(
+                &bits_value,
+                &bits_result,
+                shift_m31,
+            );
+
+            for (i, constraint) in constraints.iter().enumerate() {
+                assert_eq!(
+                    *constraint, M31::ZERO,
+                    "SRA({:#x} >> {}) failed at bit {}, expected {:#x}",
+                    value, shift, i, expected
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_shift_soundness() {
+        // Test that wrong shift result fails constraint
+        let value = 0x12345678u32;
+        let shift = 4u32;
+        let wrong_result = 0x23456781u32; // Should be 0x23456780
+
+        let bits_value = u32_to_bits(value);
+        let bits_wrong = u32_to_bits(wrong_result);
+        let shift_m31 = M31::new(shift);
+
+        let constraints = CpuAir::shift_left_logical_constraints(
+            &bits_value,
+            &bits_wrong,
+            shift_m31,
+        );
+
+        let has_nonzero = constraints.iter().any(|c| *c != M31::ZERO);
+        assert!(has_nonzero, "Constraint should catch incorrect shift result");
     }
 }
