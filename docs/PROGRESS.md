@@ -104,6 +104,21 @@
 - **Commit**: `7a5ac92`
 - **Result**: All 355 tests passing. Verifier now validates polynomial consistency.
 
+##### Shift Operations (SLL/SRL/SRA)
+- **Status**: ✅ COMPLETE
+- **Impact**: Can now constrain all RISC-V shift instructions
+- **Implementation**:
+  - Added `shift_left_logical_constraints()`: Shifts bits left, zero-fill from right
+  - Added `shift_right_logical_constraints()`: Shifts bits right, zero-fill from left
+  - Added `shift_right_arithmetic_constraints()`: Shifts bits right, sign-extend from left
+  - All shifts work on bit decomposition: result[i] = value[i ± shift]
+  - Handles shift amounts 0-31 correctly
+  - 32 constraints per shift operation
+- **Files**: `crates/air/src/cpu.rs`
+- **Tests**: 8 comprehensive tests (edge cases, soundness)
+- **Commit**: `227aa15`
+- **Result**: All 30 AIR tests passing (8 new shift + 22 existing). System total: 363 tests.
+
 ---
 
 ## 📊 Progress Metrics
@@ -129,10 +144,10 @@
 |-----------|--------|-------|--------|
 | **Primitives** | 95% | 95% | - |
 | **Executor** | 100% | 100% | - |
-| **AIR** | 29% | 45% | +16% ⬆️ |
+| **AIR** | 29% | 52% | +23% ⬆️ |
 | **Prover** | 75% | 80% | +5% ⬆️ |
 | **Verifier** | 40% | 75% | +35% ⬆️ |
-| **Overall** | 68% | 79% | +11% ⬆️ |
+| **Overall** | 68% | 81% | +13% ⬆️ |
 
 ---
 
@@ -150,19 +165,30 @@ All 8 critical soundness issues have been fixed:
 7. ✅ Bitwise operations (AND/OR/XOR)
 8. ✅ DEEP quotient verification
 
-**System Status**: 79% complete, verifier at 75%
+**System Status**: 81% complete, AIR at 52%, verifier at 75%
 
-### Priority 2 (Phase 2 - Next Session):
-1. **Complete load/store value constraints** (6 hours)
-   - Add memory access trace columns
-   - Implement LB/LH/LW/LBU/LHU load constraints
-   - Implement SB/SH/SW store constraints
-   - Add byte/halfword alignment checks
-   - Add test with invalid DEEP quotients
+### ✅ Phase 2 Started - Additional Constraints
 
-### Priority 2 (This Week):
-4. **Add shift operation constraints** (4 hours)
-5. **Implement I-type instruction constraints** (4 hours)
+**Completed**:
+- ✅ Shift operations (SLL/SRL/SRA) - 4 hours
+
+**In Progress**:
+- 🔄 I-type immediate operations
+- 🔄 Comparison operations (SLT/SLTU)
+- 🔄 Load/store value constraints
+
+### Priority 2 (Phase 2 - Continuing):
+1. **Implement I-type ALU constraints** (4 hours)
+   - ADDI, ANDI, ORI, XORI (reuse existing logic)
+   - SLTI, SLTIU (comparison with immediate)
+   - SLLI, SRLI, SRAI (immediate shifts - reuse shift logic)
+   
+2. **Implement comparison operations** (3 hours)
+   - SLT (set less than - signed)
+   - SLTU (set less than - unsigned)
+   - Add sign/magnitude decomposition
+   
+3. **Complete load/store value constraints** (6 hours)
 6. **Add load/store memory value columns** (3 hours)
 7. **Integration testing** (3 hours)
 
