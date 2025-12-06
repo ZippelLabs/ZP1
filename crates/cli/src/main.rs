@@ -383,7 +383,7 @@ fn prove_command(
     trace_column.resize(padded_len, M31::ZERO);
     
     let mut prover = StarkProver::new(config.clone());
-    let proof = prover.prove(vec![trace_column]);
+    let proof = prover.prove(vec![trace_column], &[]);
     
     println!("       Proof generated ({:?})", prove_start.elapsed());
     println!("       FRI layers: {}", proof.fri_proof.layer_commitments.len());
@@ -849,7 +849,7 @@ fn bench_command(log_size: usize) {
     };
     
     let mut prover = StarkProver::new(config);
-    let proof = prover.prove(vec![column]);
+    let proof = prover.prove(vec![column], &[]);
     
     let prove_time = prove_start.elapsed();
     println!("  Prove time: {:?}", prove_time);

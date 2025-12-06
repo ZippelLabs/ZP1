@@ -89,7 +89,8 @@ mod tests {
         };
 
         let mut prover = StarkProver::new(config);
-        let proof = prover.prove(columns);
+        let public_inputs = vec![]; // No public inputs
+        let proof = prover.prove(columns, &public_inputs);
 
         // Check proof structure
         assert_ne!(proof.trace_commitment, [0u8; 32], "Trace commitment should be non-zero");
@@ -138,7 +139,8 @@ mod tests {
 
         let trace_for_proof = vec![pc_column];
         let mut prover = StarkProver::new(config);
-        let proof = prover.prove(trace_for_proof);
+        let public_inputs = vec![]; // No public inputs
+        let proof = prover.prove(trace_for_proof, &public_inputs);
 
         // 5. Check proof was generated
         assert_ne!(proof.trace_commitment, [0u8; 32]);
@@ -272,7 +274,8 @@ mod tests {
         };
 
         let mut prover = StarkProver::new(config);
-        let proof = prover.prove(vec![column]);
+        let public_inputs = vec![]; // No public inputs
+        let proof = prover.prove(vec![column], &public_inputs);
 
         assert_ne!(proof.trace_commitment, [0u8; 32]);
         println!("Large trace (2^{} = {} rows) proved successfully!", log_size, trace_len);
@@ -316,7 +319,8 @@ mod tests {
 
         let trace_for_proof = vec![pc_column];
         let mut prover = StarkProver::new(config);
-        let proof = prover.prove(trace_for_proof);
+        let public_inputs = vec![]; // No public inputs
+        let proof = prover.prove(trace_for_proof, &public_inputs);
 
         // 5. Verify proof structure
         assert_ne!(proof.trace_commitment, [0u8; 32]);

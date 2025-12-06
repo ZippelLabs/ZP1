@@ -139,15 +139,23 @@ impl StarkProver {
     ///
     /// # Arguments
     /// * `trace_columns` - Each inner Vec is a column of trace values.
+    /// * `public_inputs` - Public inputs that must be bound to the proof.
     ///
     /// # Returns
     /// A STARK proof that can be verified.
-    pub fn prove(&mut self, trace_columns: Vec<Vec<M31>>) -> StarkProof {
+    pub fn prove(&mut self, trace_columns: Vec<Vec<M31>>, public_inputs: &[M31]) -> StarkProof {
         let num_cols = trace_columns.len();
         let trace_len = trace_columns[0].len();
 
         assert!(trace_len.is_power_of_two(), "Trace length must be power of 2");
         assert_eq!(trace_len, self.config.trace_len(), "Trace length mismatch");
+
+        // ===== Phase 0: Bind Public Inputs =====
+        // CRITICAL: Absorb public inputs BEFORE any commitments
+        // This binds the proof to specific public inputs and prevents replay attacks
+        for &public_input in public_inputs {
+            self.channel.absorb_felt(public_input);
+        }
 
         // ===== Phase 1: Trace Commitment =====
         // Low-degree extend the trace
@@ -648,7 +656,8 @@ mod tests {
         };
 
         let mut prover = StarkProver::new(config.clone());
-        let proof = prover.prove(vec![clock]);
+        let public_inputs = vec![]; // No public inputs for this test
+        let proof = prover.prove(vec![clock], &public_inputs);
 
         // Verify proof structure
         assert_eq!(proof.trace_commitment.len(), 32);
@@ -694,7 +703,8 @@ mod tests {
         };
         
         let mut prover = StarkProver::new(config.clone());
-        let proof = prover.prove(vec![col1, col2]);
+        let public_inputs = vec![]; // No public inputs for this test
+        let proof = prover.prove(vec![col1, col2], &public_inputs);
         
         assert_eq!(proof.ood_values.trace_at_z.len(), 2);
         assert_eq!(proof.query_proofs[0].trace_values.len(), 2);

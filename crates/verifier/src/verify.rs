@@ -251,8 +251,18 @@ impl Verifier {
     }
 
     /// Verify a STARK proof.
-    pub fn verify(&self, proof: &StarkProof) -> VerifyResult<()> {
+    /// 
+    /// # Arguments
+    /// * `proof` - The STARK proof to verify
+    /// * `public_inputs` - Public inputs that the proof is bound to
+    pub fn verify(&self, proof: &StarkProof, public_inputs: &[M31]) -> VerifyResult<()> {
         let mut channel = VerifierChannel::new(b"zp1-stark-v1");
+
+        // Step 0: Bind Public Inputs (CRITICAL - must match prover)
+        // Absorb public inputs BEFORE any commitments to prevent replay attacks
+        for &public_input in public_inputs {
+            channel.absorb_felt(public_input);
+        }
 
         // Sanity check OOD values exist
         let trace_width = proof.ood_values.trace_at_z.len();
