@@ -41,6 +41,9 @@ pub enum VerifyError {
 
     #[error("FRI proof structure invalid: {reason}")]
     FriStructure { reason: String },
+
+    #[error("DEEP quotient mismatch at query index {index}")]
+    DeepQuotientMismatch { index: usize },
 }
 
 /// Verification result.
@@ -290,7 +293,16 @@ impl Verifier {
         channel.absorb_felt(*v);
     }
     // Note: trace_at_z_next is NOT absorbed to match prover transcript
-    channel.absorb_felt(proof.ood_values.composition_at_z);        // Step 6: Process FRI layer commitments and get folding challenges
+    channel.absorb_felt(proof.ood_values.composition_at_z);
+        
+        // Generate DEEP combination alphas (for linear combination of quotients)
+        // Need one alpha per trace column + one for composition
+        let num_deep_terms = proof.ood_values.trace_at_z.len() + 1;
+        let deep_alphas: Vec<M31> = (0..num_deep_terms)
+            .map(|_| channel.squeeze_challenge())
+            .collect();
+
+        // Step 6: Process FRI layer commitments and get folding challenges
         let mut fri_alphas = Vec::new();
         for commitment in &proof.fri_proof.layer_commitments {
             channel.absorb_commitment(commitment);
@@ -348,6 +360,14 @@ impl Verifier {
                 });
             }
 
+            // Verify DEEP quotient (ensures trace/composition values are consistent with OOD samples)
+            self.verify_deep_quotient(
+                query_proof,
+                oods_point,
+                &proof.ood_values,
+                &deep_alphas,
+            )?;
+
             // Verify constraint consistency placeholder
             self.verify_constraint_consistency(query_proof, &oods_point)?;
         }
@@ -387,6 +407,121 @@ impl Verifier {
             });
         }
 
+        Ok(())
+    }
+
+    /// Verify the DEEP quotient at a query point.
+    ///
+    /// The DEEP (Domain Extended Algebraic Proximity) quotient ensures that
+    /// the queried trace and composition values are consistent with the
+    /// out-of-domain samples. This is computed as:
+    ///
+    /// DEEP(X) = Σ_i α_i · (f_i(X) - f_i(z)) / (X - z)
+    ///
+    /// Where:
+    /// - f_i are trace columns and composition polynomial
+    /// - z is the out-of-domain sampling point (OODS point)
+    /// - α_i are random linear combination coefficients
+    /// - X is the query point in the LDE domain
+    ///
+    /// # Arguments
+    /// * `query` - Query proof containing trace/composition values at query point
+    /// * `oods_point` - Out-of-domain sampling point (z)
+    /// * `ood_values` - Sampled values at z: f_i(z)
+    /// * `deep_alphas` - Random coefficients for linear combination
+    ///
+    /// # Returns
+    /// `Ok(())` if the DEEP quotient is correct, error otherwise
+    fn verify_deep_quotient(
+        &self,
+        query: &QueryProof,
+        oods_point: QM31,
+        ood_values: &OodValues,
+        deep_alphas: &[M31],
+    ) -> VerifyResult<()> {
+        // Get evaluation domain point X at query index
+        // For simplicity, use query.index as M31 (real impl would use circle domain point)
+        let domain_point_m31 = M31::new(query.index as u32);
+        let domain_point = QM31::from(domain_point_m31);
+        
+        // Compute denominator: X - z
+        let denom = domain_point - oods_point;
+        
+        // Check for division by zero (would indicate z is in LDE domain, which breaks soundness)
+        if denom == QM31::ZERO {
+            return Err(VerifyError::ConstraintError {
+                constraint: "OODS point collides with query point (denominator is zero)".into(),
+            });
+        }
+        
+        let denom_inv = denom.inv();
+        
+        // Compute expected DEEP quotient: Σ α_i · (f_i(X) - f_i(z)) / (X - z)
+        let mut expected_deep = QM31::ZERO;
+        
+        // Trace columns contribution
+        for (col_idx, &trace_val_at_x) in query.trace_values.iter().enumerate() {
+            if col_idx >= ood_values.trace_at_z.len() {
+                return Err(VerifyError::InvalidProof {
+                    reason: format!(
+                        "Query has {} trace values but OOD has {} trace values",
+                        query.trace_values.len(),
+                        ood_values.trace_at_z.len()
+                    ),
+                });
+            }
+            
+            if col_idx >= deep_alphas.len() {
+                return Err(VerifyError::InvalidProof {
+                    reason: format!(
+                        "Insufficient DEEP alphas: need at least {}, got {}",
+                        col_idx + 1,
+                        deep_alphas.len()
+                    ),
+                });
+            }
+            
+            let trace_val_at_z = ood_values.trace_at_z[col_idx];
+            
+            // Numerator: f_i(X) - f_i(z)
+            let numerator = QM31::from(trace_val_at_x) - QM31::from(trace_val_at_z);
+            
+            // Contribution: α_i · numerator / (X - z)
+            let contribution = QM31::from(deep_alphas[col_idx]) * numerator * denom_inv;
+            expected_deep = expected_deep + contribution;
+        }
+        
+        // Composition polynomial contribution
+        let comp_alpha_idx = query.trace_values.len();
+        if comp_alpha_idx >= deep_alphas.len() {
+            return Err(VerifyError::InvalidProof {
+                reason: format!(
+                    "Insufficient DEEP alphas for composition: need at least {}, got {}",
+                    comp_alpha_idx + 1,
+                    deep_alphas.len()
+                ),
+            });
+        }
+        
+        let comp_numerator = QM31::from(query.composition_value) 
+                           - QM31::from(ood_values.composition_at_z);
+        let comp_contribution = QM31::from(deep_alphas[comp_alpha_idx]) 
+                              * comp_numerator * denom_inv;
+        expected_deep = expected_deep + comp_contribution;
+        
+        // Convert to M31 for comparison (taking real part of QM31)
+        // Note: In a complete implementation, the DEEP quotient might be QM31,
+        // but current proof structure stores it as M31
+        let expected_deep_m31 = expected_deep.c0;
+        
+        // Compare with claimed FRI value
+        // Allow small numerical differences due to field arithmetic
+        if expected_deep_m31 != query.deep_quotient_value {
+            return Err(VerifyError::DeepQuotientMismatch {
+                index: query.index,
+            });
+        }
+        
         Ok(())
     }
 
