@@ -73,6 +73,21 @@
 - **Commit**: `f90cf34`
 - **Result**: Proofs now cryptographically bound to public inputs. All 344 tests passing.
 
+##### Bitwise Operations (AND/OR/XOR)
+- **Status**: ✅ FIXED
+- **Impact**: Can now constrain bitwise logic operations
+- **Implementation**:
+  - Added `bit_decomposition_constraints()`: Ensures each bit is 0 or 1, and bits reconstruct value
+  - Added `bitwise_and_constraints()`: result[i] = a[i] * b[i]
+  - Added `bitwise_or_constraints()`: result[i] = a[i] + b[i] - a[i]*b[i]
+  - Added `bitwise_xor_constraints()`: result[i] = a[i] + b[i] - 2*a[i]*b[i]
+  - 34 constraints per decomposition (32 bit + 2 reconstruction)
+  - 32 constraints per bitwise operation
+- **Files**: `crates/air/src/cpu.rs`
+- **Tests**: 11 comprehensive tests added (decomposition, operations, soundness)
+- **Commit**: `40aea73`
+- **Result**: All 22 AIR tests passing. Bitwise operations ready for integration.
+
 ---
 
 ## 📊 Progress Metrics
@@ -87,10 +102,10 @@
 | x0 = 0 enforcement | ✅ | 0.5h | Complete |
 | RAM permutation | ✅ | 3h | LogUp constraint done |
 | Load/store constraints | 🟡 | 2h | Stubs added, need trace columns |
-| Bitwise operations | ⏳ | - | TODO - next priority |
-| DEEP quotient verification | ⏳ | - | TODO |
+| Bitwise operations | ✅ | 4h | Complete - AND/OR/XOR with bit decomposition |
+| DEEP quotient verification | ⏳ | - | TODO - next priority |
 
-**Progress**: 7/8 tasks (5.5/26 hours = 21%)
+**Progress**: 7/8 tasks (9.5/26 hours = 37%)
 
 ### Overall System Status
 
@@ -98,23 +113,17 @@
 |-----------|--------|-------|--------|
 | **Primitives** | 95% | 95% | - |
 | **Executor** | 100% | 100% | - |
-| **AIR** | 29% | 35% | +6% ⬆️ |
+| **AIR** | 29% | 45% | +16% ⬆️ |
 | **Prover** | 75% | 80% | +5% ⬆️ |
 | **Verifier** | 40% | 60% | +20% ⬆️ |
-| **Overall** | 68% | 74% | +6% ⬆️ |
+| **Overall** | 68% | 76% | +8% ⬆️ |
 
 ---
 
 ## 🎯 Next Steps (Immediate)
 
 ### Priority 1 (Next Session):
-1. **Implement bitwise operations** (4 hours)
-   - Add bit decomposition columns to CpuTraceRow
-   - Implement AND/OR/XOR constraints via bit operations
-   - Add constraint: `bit * (bit - 1) = 0` for each bit
-   - Test with bitwise instruction traces
-
-3. **Implement DEEP quotient verification** (4 hours)
+1. **Implement DEEP quotient verification** (4 hours)
    - Add `verify_deep_quotient()` function
    - Reconstruct DEEP quotient from query values
    - Compare with FRI polynomial value
