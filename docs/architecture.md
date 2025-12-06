@@ -34,14 +34,14 @@ Circle STARK prover for RISC-V RV32IM over Mersenne31 ($p = 2^{31} - 1$).
 - Shifts: SLL, SRL, SRA with bit decomposition
 - Branches: BEQ, BNE, BLT, BGE, BLTU, BGEU
 - Jumps: JAL, JALR with link register
-- Memory: LW, SW (LB/LH/SB/SH placeholders)
+- Memory: LW/SW fully constrained; LB/LBU/LH/LHU/SB/SH share value-consistency checks but still need byte/half extraction + masking wiring
 - M-extension: MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU
 - Invariant: x0 = 0 enforced every step
 
 ## Memory Consistency
 - **RAM permutation**: LogUp argument sorts by (addr, timestamp)
 - **Read/write**: Consistency via grand product accumulation
-- **Width handling**: Byte/half/word access constraints
+- **Width handling**: Word proven; sub-word paths share value constraints pending extraction/masking wiring
 - **Init table**: Program image + static data preloaded
 
 ## FRI Commitment

@@ -135,25 +135,18 @@
 - **Result**: All 35 AIR tests passing (5 new + 30 existing). System total: 368 tests.
 
 ##### Load/Store Value Constraints
-- **Status**: ✅ COMPLETE (LW/SW), ⏳ PLACEHOLDERS (byte/halfword)
-- **Impact**: Can now constrain memory load/store operations
+- **Status**: ✅ COMPLETE (word), ⏳ PARTIAL (byte/halfword)
+- **Impact**: Value consistency now enforced for memory load/store operations
 - **Implementation**:
-  - Added `load_word_constraint()`: rd = mem[addr] (fully implemented)
-  - Added `store_word_constraint()`: mem[addr] = rs2 (fully implemented)
-  - Added `load_byte_constraint()`: LB with sign extension (placeholder - needs bit extraction)
-  - Added `load_halfword_constraint()`: LH with sign extension (placeholder - needs bit extraction)
-  - Added `load_byte_unsigned_constraint()`: LBU zero extension (placeholder)
-  - Added `load_halfword_unsigned_constraint()`: LHU zero extension (placeholder)
-  - Added `store_byte_constraint()`: SB with masking (placeholder - needs bit masking)
-  - Added `store_halfword_constraint()`: SH with masking (placeholder - needs bit masking)
-  - Added `word_alignment_constraint()`: Check 4-byte alignment (placeholder)
-  - Added `halfword_alignment_constraint()`: Check 2-byte alignment (placeholder)
-  - Word operations use simple equality: LW checks rd_val = mem_value, SW checks new_mem = rs2_val
-  - Byte/halfword operations need bit decomposition for extraction/masking (future work)
-- **Files**: `crates/air/src/cpu.rs`
-- **Tests**: 6 comprehensive tests (LW/SW full, byte/half placeholders, alignment)
-- **Commit**: `f65154f`
-- **Result**: All 51 AIR tests passing (6 new + 45 existing). System total: 419 tests.
+  - Added per-variant selectors and mem_val columns to RV32IM CPU trace row (`is_lb/lbu/lh/lhu/lw`, `is_sb/sh/sw`, `mem_val_lo/hi`, `sb_carry`)
+  - Added `load_value_constraint()` that binds rd to loaded value across all load variants (assumes value already sign/zero extended)
+  - Added `store_value_constraint()` covering SW (full word), SH (low 16 bits, zero high), SB (low 8 bits via witness, zero high)
+  - MUL high-word selector placeholder added for completeness
+  - Remaining work: wire byte/half extraction/masking and selector plumbing in the trace builder
+- **Files**: `crates/air/src/rv32im.rs`
+- **Tests**: 4 new unit tests for load/store value paths (word/half/byte/store), total AIR tests unchanged
+- **Commit**: `240aa0d`
+- **Result**: Load/store value constraints are enforced; sub-word extraction/masking still TODO. System total remains 407 passing tests.
 
 ##### I-Type Immediate Instructions
 - **Status**: ✅ ALREADY IMPLEMENTED

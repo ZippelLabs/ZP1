@@ -10,7 +10,7 @@ Zero-knowledge prover for RISC-V RV32IM execution traces using Circle STARKs ove
 - ✅ Critical soundness fixes applied (Fiat-Shamir, domain separator, public inputs, x0 enforcement, RAM permutation)
 - ✅ DEEP quotient verification for polynomial consistency
 - ✅ 407 tests passing (zero failures)
-- ⏳ AIR integration and end-to-end prove/verify in progress
+- ⏳ AIR plumbing for load/store variant selectors and trace wiring still in progress
 
 **Not production-ready yet.** Full integration testing required.
 
@@ -58,17 +58,17 @@ All 47 RV32IM instructions now have constraint implementations:
 - Branches: BEQ, BNE, BLT, BGE, BLTU, BGEU (condition + PC update)
 - Jumps: JAL, JALR (link register + target)
 - Immediates: ADDI, ANDI, ORI, XORI, SLTI, SLTIU, SLLI, SRLI, SRAI
-- Loads: LW, LH, LB, LHU, LBU (word complete, sub-word placeholders)
-- Stores: SW, SH, SB (word complete, sub-word placeholders)
+- Loads: LW fully checked; LB/LBU/LH/LHU share value-consistency constraint but still need byte/half extraction wiring
+- Stores: SW fully checked; SB/SH share value-consistency constraint with masking witness, still need byte/half masking wiring
 - M-extension: MUL, MULH, MULHSU, MULHU, DIV, DIVU, REM, REMU (functional placeholders)
 - Upper: LUI, AUIPC
 - System: ECALL, EBREAK (executor only, not provable)
 
 **TODO**:
-- Wire constraints into full AIR evaluation
+- Wire per-variant load/store selectors into trace builder and AIR evaluation
 - Add carry tracking for 64-bit multiply
 - Add range checks for division remainder
-- Implement byte/halfword extraction for sub-word load/store
+- Implement byte/halfword extraction and masking for sub-word load/store
 
 ### Executor
 
