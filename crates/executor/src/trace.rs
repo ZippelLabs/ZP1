@@ -29,6 +29,8 @@ pub enum MemOp {
     Ecrecover { input_ptr: u32, output_ptr: u32 },
     /// SHA-256 hash operation (delegated to specialized circuit).
     Sha256 { message_ptr: usize, message_len: usize, digest_ptr: usize },
+    /// RIPEMD-160 hash operation (delegated to specialized circuit).
+    Ripemd160 { message_ptr: usize, message_len: usize, digest_ptr: usize },
 }
 
 /// Flags indicating instruction class for AIR constraint selection.

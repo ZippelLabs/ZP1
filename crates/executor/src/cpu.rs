@@ -643,6 +643,45 @@ impl Cpu {
                                         self.set_reg(10, 0);
                                         next_pc = self.pc.wrapping_add(4);
                                     }
+                                    0x1003 => {
+                                        // RIPEMD-160 syscall
+                                        // a0 = message pointer
+                                        // a1 = message length
+                                        // a2 = digest pointer (20 bytes)
+                                        
+                                        let message_ptr = self.get_reg(10);
+                                        let message_len = self.get_reg(11);
+                                        let digest_ptr = self.get_reg(12);
+                                        
+                                        // Validate pointers
+                                        if !self.memory.is_valid_range(message_ptr, message_len) {
+                                            return Err(ExecutorError::OutOfBounds { addr: message_ptr });
+                                        }
+                                        if !self.memory.is_valid_range(digest_ptr, 20) {
+                                            return Err(ExecutorError::OutOfBounds { addr: digest_ptr });
+                                        }
+                                        
+                                        // Extract input data
+                                        let message = self.memory.slice(message_ptr, message_len as usize)
+                                            .ok_or(ExecutorError::OutOfBounds { addr: message_ptr })?;
+                                        
+                                        // Compute RIPEMD-160 hash using delegation module
+                                        let digest = zp1_delegation::ripemd160::ripemd160(message);
+                                        
+                                        // Write digest to memory
+                                        self.memory.write_slice(digest_ptr, &digest)?;
+                                        
+                                        // Record the delegation in trace
+                                        mem_op = MemOp::Ripemd160 {
+                                            message_ptr: message_ptr as usize,
+                                            message_len: message_len as usize,
+                                            digest_ptr: digest_ptr as usize,
+                                        };
+                                        
+                                        // Return success (a0 = 0)
+                                        self.set_reg(10, 0);
+                                        next_pc = self.pc.wrapping_add(4);
+                                    }
                                     93 => {
                                         // Linux exit syscall - allow this for program termination
                                         return Err(ExecutorError::Ecall { pc: self.pc, syscall_id });
