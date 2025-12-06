@@ -462,6 +462,8 @@ impl TraceColumns {
                 // Keccak256 is delegated to a separate circuit, so it doesn't appear in the main trace
                 // The delegation link is recorded separately
                 zp1_executor::trace::MemOp::Keccak256 { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                // ECRECOVER is also delegated to a separate circuit
+                zp1_executor::trace::MemOp::Ecrecover { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             };
             cols.mem_addr_lo.push(M31::new(mem_addr & 0xFFFF));
             cols.mem_addr_hi.push(M31::new((mem_addr >> 16) & 0xFFFF));

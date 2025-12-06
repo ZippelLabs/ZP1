@@ -553,6 +553,57 @@ impl Cpu {
                                         self.set_reg(10, 0);
                                         next_pc = self.pc.wrapping_add(4);
                                     }
+                                    0x1001 => {
+                                        // ECRECOVER syscall (signature recovery)
+                                        // a0 = input pointer (97 bytes: hash(32) || v(1) || r(32) || s(32))
+                                        // a1 = output pointer (20 bytes: address)
+                                        let input_ptr = self.get_reg(10);
+                                        let output_ptr = self.get_reg(11);
+                                        
+                                        // Validate pointers
+                                        if !self.memory.is_valid_range(input_ptr, 97) {
+                                            return Err(ExecutorError::OutOfBounds { addr: input_ptr });
+                                        }
+                                        if !self.memory.is_valid_range(output_ptr, 20) {
+                                            return Err(ExecutorError::OutOfBounds { addr: output_ptr });
+                                        }
+                                        
+                                        // Extract input data
+                                        let input_data = self.memory.slice(input_ptr, 97)
+                                            .ok_or(ExecutorError::OutOfBounds { addr: input_ptr })?;
+                                        
+                                        let mut hash = [0u8; 32];
+                                        let mut r = [0u8; 32];
+                                        let mut s = [0u8; 32];
+                                        hash.copy_from_slice(&input_data[0..32]);
+                                        let v = input_data[32];
+                                        r.copy_from_slice(&input_data[33..65]);
+                                        s.copy_from_slice(&input_data[65..97]);
+                                        
+                                        // Perform ECRECOVER using delegation module
+                                        let address = zp1_delegation::ecrecover::ecrecover(&hash, v, &r, &s);
+                                        
+                                        // Write output to memory
+                                        match address {
+                                            Some(addr) => {
+                                                self.memory.write_slice(output_ptr, &addr)?;
+                                                self.set_reg(10, 0); // Success
+                                            }
+                                            None => {
+                                                // Invalid signature - write zero address
+                                                self.memory.write_slice(output_ptr, &[0u8; 20])?;
+                                                self.set_reg(10, 1); // Failure
+                                            }
+                                        }
+                                        
+                                        // Record the delegation in trace
+                                        mem_op = MemOp::Ecrecover {
+                                            input_ptr,
+                                            output_ptr,
+                                        };
+                                        
+                                        next_pc = self.pc.wrapping_add(4);
+                                    }
                                     93 => {
                                         // Linux exit syscall - allow this for program termination
                                         return Err(ExecutorError::Ecall { pc: self.pc, syscall_id });
