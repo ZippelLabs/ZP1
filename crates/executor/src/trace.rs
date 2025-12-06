@@ -27,6 +27,8 @@ pub enum MemOp {
     Keccak256 { input_ptr: u32, input_len: u32, output_ptr: u32 },
     /// ECRECOVER signature verification (delegated to specialized circuit).
     Ecrecover { input_ptr: u32, output_ptr: u32 },
+    /// SHA-256 hash operation (delegated to specialized circuit).
+    Sha256 { message_ptr: usize, message_len: usize, digest_ptr: usize },
 }
 
 /// Flags indicating instruction class for AIR constraint selection.

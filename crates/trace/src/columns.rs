@@ -464,6 +464,8 @@ impl TraceColumns {
                 zp1_executor::trace::MemOp::Keccak256 { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
                 // ECRECOVER is also delegated to a separate circuit
                 zp1_executor::trace::MemOp::Ecrecover { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                // SHA-256 is also delegated to a separate circuit
+                zp1_executor::trace::MemOp::Sha256 { .. } => (0u32, 0u32, 0, 0, 0, 0, 0, 0, 0, 0, 0),
             };
             cols.mem_addr_lo.push(M31::new(mem_addr & 0xFFFF));
             cols.mem_addr_hi.push(M31::new((mem_addr >> 16) & 0xFFFF));
