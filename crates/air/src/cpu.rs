@@ -288,6 +288,127 @@ impl CpuAir {
         
         constraints
     }
+
+    /// Evaluate SLT (Set Less Than) constraint for signed comparison.
+    /// result = (a < b) ? 1 : 0, where a and b are signed 32-bit integers.
+    ///
+    /// Uses subtraction and sign checking:
+    /// - Compute diff = a - b
+    /// - Check sign bit of diff to determine result
+    ///
+    /// # Arguments
+    /// * `bits_a` - Bit decomposition of first operand (signed)
+    /// * `bits_b` - Bit decomposition of second operand (signed)
+    /// * `result` - Comparison result (must be 0 or 1)
+    /// * `diff_bits` - Bit decomposition of (a - b) with borrow handling
+    ///
+    /// # Returns
+    /// Vector of constraints enforcing correct signed comparison
+    pub fn set_less_than_signed_constraints(
+        bits_a: &[M31; 32],
+        bits_b: &[M31; 32],
+        result: M31,
+        diff_bits: &[M31; 32],
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+        
+        // Constraint 1: result must be binary (0 or 1)
+        constraints.push(result * (result - M31::ONE));
+        
+        // Constraint 2: Check sign bits for signed comparison
+        // If sign(a) != sign(b):
+        //   result = sign(a) (1 if a is negative, 0 if a is positive)
+        // If sign(a) == sign(b):
+        //   result = sign(a - b)
+        
+        let sign_a = bits_a[31];
+        let sign_b = bits_b[31];
+        let sign_diff = diff_bits[31];
+        
+        // Case 1: Different signs
+        // If a is negative and b is positive: result = 1
+        // If a is positive and b is negative: result = 0
+        let diff_signs = sign_a * (M31::ONE - sign_b); // 1 if a<0 and b>=0
+        
+        // Case 2: Same signs - use difference sign
+        let same_signs = M31::ONE - sign_a - sign_b + sign_a * sign_b * M31::new(2);
+        let diff_result = same_signs * sign_diff;
+        
+        // Combined: result = diff_signs + diff_result
+        constraints.push(result - diff_signs - diff_result);
+        
+        constraints
+    }
+
+    /// Evaluate SLTU (Set Less Than Unsigned) constraint.
+    /// result = (a < b) ? 1 : 0, where a and b are unsigned 32-bit integers.
+    ///
+    /// For unsigned comparison, we check if borrow occurred in a - b.
+    ///
+    /// # Arguments
+    /// * `bits_a` - Bit decomposition of first operand (unsigned)
+    /// * `bits_b` - Bit decomposition of second operand (unsigned)
+    /// * `result` - Comparison result (must be 0 or 1)
+    /// * `borrow` - Borrow bit from subtraction a - b
+    ///
+    /// # Returns
+    /// Vector of constraints enforcing correct unsigned comparison
+    pub fn set_less_than_unsigned_constraints(
+        _bits_a: &[M31; 32],
+        _bits_b: &[M31; 32],
+        result: M31,
+        borrow: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+        
+        // Constraint 1: result must be binary (0 or 1)
+        constraints.push(result * (result - M31::ONE));
+        
+        // Constraint 2: borrow must be binary (0 or 1)
+        constraints.push(borrow * (borrow - M31::ONE));
+        
+        // Constraint 3: For unsigned, a < b iff borrow occurred in a - b
+        // result = borrow
+        constraints.push(result - borrow);
+        
+        constraints
+    }
+
+    /// Evaluate SUB (Subtract) constraint with borrow tracking.
+    /// result = a - b (mod 2^32)
+    ///
+    /// This is used for comparison operations to detect if a < b.
+    ///
+    /// # Arguments
+    /// * `a_lo`, `a_hi` - Limbs of first operand
+    /// * `b_lo`, `b_hi` - Limbs of second operand
+    /// * `result_lo`, `result_hi` - Limbs of result
+    /// * `borrow` - Borrow from high to low limb (1 if low underflows, 0 otherwise)
+    ///
+    /// # Returns
+    /// Tuple of (low_constraint, high_constraint)
+    #[inline]
+    pub fn sub_with_borrow_constraint(
+        a_lo: M31,
+        a_hi: M31,
+        b_lo: M31,
+        b_hi: M31,
+        result_lo: M31,
+        result_hi: M31,
+        borrow: M31,
+    ) -> (M31, M31) {
+        let two_16 = M31::new(1 << 16);
+        
+        // Low limb: result_lo + b_lo = a_lo + borrow * 2^16
+        // If a_lo < b_lo, we borrow from high (borrow = 1)
+        let c_lo = a_lo + borrow * two_16 - b_lo - result_lo;
+        
+        // High limb: result_hi + b_hi + borrow = a_hi
+        // We subtract the borrowed amount from high limb
+        let c_hi = a_hi - b_hi - borrow - result_hi;
+        
+        (c_lo, c_hi)
+    }
 }
 
 #[cfg(test)]
@@ -723,5 +844,187 @@ mod tests {
 
         let has_nonzero = constraints.iter().any(|c| *c != M31::ZERO);
         assert!(has_nonzero, "Constraint should catch incorrect shift result");
+    }
+
+    #[test]
+    fn test_set_less_than_unsigned() {
+        // Test SLTU: unsigned comparison
+        let test_cases = [
+            (5u32, 10u32, 1u32, 1u32),    // 5 < 10 = true, borrow = 1
+            (10u32, 5u32, 0u32, 0u32),    // 10 < 5 = false, borrow = 0
+            (5u32, 5u32, 0u32, 0u32),     // 5 < 5 = false, borrow = 0
+            (0u32, 1u32, 1u32, 1u32),     // 0 < 1 = true, borrow = 1
+            (0xFFFFFFFFu32, 0u32, 0u32, 0u32), // max < 0 = false (unsigned)
+        ];
+
+        for (a, b, expected_result, expected_borrow) in test_cases {
+            let bits_a = u32_to_bits(a);
+            let bits_b = u32_to_bits(b);
+            let result = M31::new(expected_result);
+            let borrow = M31::new(expected_borrow);
+
+            let constraints = CpuAir::set_less_than_unsigned_constraints(
+                &bits_a,
+                &bits_b,
+                result,
+                borrow,
+            );
+
+            for (i, constraint) in constraints.iter().enumerate() {
+                assert_eq!(
+                    *constraint, M31::ZERO,
+                    "SLTU({} < {}) failed at constraint {}", a, b, i
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_set_less_than_signed_same_sign() {
+        // Test SLT with same sign (both positive or both negative)
+        // When signs are same, compare magnitudes via subtraction
+        
+        // Case 1: Both positive
+        let a = 5u32;
+        let b = 10u32;
+        let diff = (a.wrapping_sub(b)) as u32; // Will have sign bit set
+        
+        let bits_a = u32_to_bits(a);
+        let bits_b = u32_to_bits(b);
+        let diff_bits = u32_to_bits(diff);
+        let result = M31::ONE; // 5 < 10 = true
+
+        let constraints = CpuAir::set_less_than_signed_constraints(
+            &bits_a,
+            &bits_b,
+            result,
+            &diff_bits,
+        );
+
+        for constraint in constraints {
+            assert_eq!(constraint, M31::ZERO, "SLT(5 < 10) failed");
+        }
+    }
+
+    #[test]
+    fn test_set_less_than_signed_different_signs() {
+        // Test SLT with different signs
+        // Negative < Positive = true
+        // Positive < Negative = false
+        
+        // Case 1: negative < positive (true)
+        let a = 0xFFFFFFFEu32; // -2 in two's complement
+        let b = 5u32;          // +5
+        let diff = a.wrapping_sub(b);
+        
+        let bits_a = u32_to_bits(a);
+        let bits_b = u32_to_bits(b);
+        let diff_bits = u32_to_bits(diff);
+        let result = M31::ONE; // -2 < 5 = true
+
+        let constraints = CpuAir::set_less_than_signed_constraints(
+            &bits_a,
+            &bits_b,
+            result,
+            &diff_bits,
+        );
+
+        for constraint in constraints {
+            assert_eq!(constraint, M31::ZERO, "SLT(-2 < 5) failed");
+        }
+
+        // Case 2: positive < negative (false)
+        let a2 = 5u32;
+        let b2 = 0xFFFFFFFEu32; // -2
+        let diff2 = a2.wrapping_sub(b2);
+        
+        let bits_a2 = u32_to_bits(a2);
+        let bits_b2 = u32_to_bits(b2);
+        let diff_bits2 = u32_to_bits(diff2);
+        let result2 = M31::ZERO; // 5 < -2 = false
+
+        let constraints2 = CpuAir::set_less_than_signed_constraints(
+            &bits_a2,
+            &bits_b2,
+            result2,
+            &diff_bits2,
+        );
+
+        for constraint in constraints2 {
+            assert_eq!(constraint, M31::ZERO, "SLT(5 < -2) failed");
+        }
+    }
+
+    #[test]
+    fn test_sub_with_borrow() {
+        // Test SUB constraint with borrow
+        // Borrow occurs when low limb underflows: a_lo < b_lo
+        
+        // Case 1: 10 - 5 = 5, no borrow in limbs
+        let a = 10u32;
+        let b = 5u32;
+        let (a_lo, a_hi) = u32_to_limbs(a);
+        let (b_lo, b_hi) = u32_to_limbs(b);
+        let result = a.wrapping_sub(b);
+        let (result_lo, result_hi) = u32_to_limbs(result);
+        let borrow = if a_lo.value() < b_lo.value() { M31::ONE } else { M31::ZERO };
+
+        let (c_lo, c_hi) = CpuAir::sub_with_borrow_constraint(
+            a_lo, a_hi, b_lo, b_hi, result_lo, result_hi, borrow,
+        );
+        assert_eq!(c_lo, M31::ZERO, "SUB({} - {}) low limb failed", a, b);
+        assert_eq!(c_hi, M31::ZERO, "SUB({} - {}) high limb failed", a, b);
+
+        // Case 2: 0x10005 - 0x10 = 0xFFF5, requires borrow from high limb
+        let a2 = 0x10005u32;
+        let b2 = 0x10u32;
+        let (a_lo2, a_hi2) = u32_to_limbs(a2);
+        let (b_lo2, b_hi2) = u32_to_limbs(b2);
+        let result2 = a2.wrapping_sub(b2);
+        let (result_lo2, result_hi2) = u32_to_limbs(result2);
+        let borrow2 = if a_lo2.value() < b_lo2.value() { M31::ONE } else { M31::ZERO };
+
+        let (c_lo2, c_hi2) = CpuAir::sub_with_borrow_constraint(
+            a_lo2, a_hi2, b_lo2, b_hi2, result_lo2, result_hi2, borrow2,
+        );
+        assert_eq!(c_lo2, M31::ZERO, "SUB({:#x} - {:#x}) low limb failed", a2, b2);
+        assert_eq!(c_hi2, M31::ZERO, "SUB({:#x} - {:#x}) high limb failed", a2, b2);
+
+        // Case 3: 0x20000 - 0x10005 = 0xFFFB, requires borrow
+        let a3 = 0x20000u32;
+        let b3 = 0x10005u32;
+        let (a_lo3, a_hi3) = u32_to_limbs(a3);
+        let (b_lo3, b_hi3) = u32_to_limbs(b3);
+        let result3 = a3.wrapping_sub(b3);
+        let (result_lo3, result_hi3) = u32_to_limbs(result3);
+        let borrow3 = if a_lo3.value() < b_lo3.value() { M31::ONE } else { M31::ZERO };
+
+        let (c_lo3, c_hi3) = CpuAir::sub_with_borrow_constraint(
+            a_lo3, a_hi3, b_lo3, b_hi3, result_lo3, result_hi3, borrow3,
+        );
+        assert_eq!(c_lo3, M31::ZERO, "SUB({:#x} - {:#x}) low limb failed", a3, b3);
+        assert_eq!(c_hi3, M31::ZERO, "SUB({:#x} - {:#x}) high limb failed", a3, b3);
+    }
+
+    #[test]
+    fn test_comparison_soundness() {
+        // Test that wrong comparison result fails constraint
+        let a = 5u32;
+        let b = 10u32;
+        let wrong_result = M31::ZERO; // Should be 1 (5 < 10)
+        let borrow = M31::ONE;
+
+        let bits_a = u32_to_bits(a);
+        let bits_b = u32_to_bits(b);
+
+        let constraints = CpuAir::set_less_than_unsigned_constraints(
+            &bits_a,
+            &bits_b,
+            wrong_result,
+            borrow,
+        );
+
+        let has_nonzero = constraints.iter().any(|c| *c != M31::ZERO);
+        assert!(has_nonzero, "Constraint should catch incorrect comparison result");
     }
 }
