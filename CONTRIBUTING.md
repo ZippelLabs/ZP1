@@ -27,7 +27,7 @@ and the repo's maintainers will review the PR.
 
 ## Licenses
 
-If you contribute to this project, your contributions will be made to the project under the MIT
+If you contribute to this project, your contributions will be made to the project under the MIT OR Apache-2.0
 license.
 
 ## Resources
