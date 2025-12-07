@@ -92,5 +92,3 @@ GPU support planned for FFT/Merkle operations.
 - GPU optimization (CUDA backend completion)
 - Performance tuning for large traces
 - External security audit
-
-See `COMPLETION_STATUS.md` for comprehensive status tracking.
