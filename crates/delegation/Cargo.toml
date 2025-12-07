@@ -16,3 +16,8 @@ blake2 = "0.10"
 [dev-dependencies]
 rand = { workspace = true }
 hex = "0.4"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "crypto_bench"
+harness = false

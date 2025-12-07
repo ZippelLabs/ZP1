@@ -14,3 +14,8 @@ serde = { workspace = true }
 rand = { workspace = true }
 hex = "0.4"
 secp256k1 = { version = "0.29", features = ["recovery", "global-context"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "syscall_bench"
+harness = false

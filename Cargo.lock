@@ -5311,6 +5311,7 @@ name = "zp1-delegation"
 version = "0.1.0"
 dependencies = [
  "blake2",
+ "criterion",
  "hex",
  "rand 0.8.5",
  "ripemd",
@@ -5349,6 +5350,7 @@ dependencies = [
 name = "zp1-executor"
 version = "0.1.0"
 dependencies = [
+ "criterion",
  "hex",
  "rand 0.8.5",
  "secp256k1 0.29.1",
