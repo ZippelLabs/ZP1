@@ -1,21 +1,28 @@
-[package]
-name = "crypto-demo"
+[workspace]
+resolver = "2"
+members = [
+    "fibonacci",
+    "keccak",
+    "sha256",
+    "ecrecover",
+    "memory-test",
+]
+
+# guest-hello excluded due to serde_core no_std compatibility issues
+# Use it as a reference template only
+exclude = ["guest-hello"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-
-[workspace]
-
-[[bin]]
-name = "crypto_demo"
-path = "crypto_demo.rs"
-
-[dependencies]
+license = "MIT OR Apache-2.0"
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
+strip = true
 
 [profile.dev]
 panic = "abort"

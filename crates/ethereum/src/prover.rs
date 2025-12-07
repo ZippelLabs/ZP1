@@ -59,16 +59,17 @@ impl TransactionProver {
         })
     }
 
-    /// Execute transaction (stub implementation).
+    /// Execute transaction using the guest program inside zkVM.
     async fn execute_transaction(&self, tx: &TransactionData) -> Result<TransactionResult> {
-        // TODO: Use Revm to execute EVM transaction
-        Ok(TransactionResult {
-            hash: tx.hash,
-            gas_used: tx.gas,
-            success: true,
-            return_data: vec![],
-            state_changes: vec![],
-        })
+        // TODO: Once guest program is compiled and integrated:
+        // 1. Compile guest program to RISC-V ELF
+        // 2. Load guest ELF
+        // 3. Prepare transaction input for guest
+        // 4. Execute guest in zkVM with tx data
+        // 5. Read result from journal
+        
+        // For now, keep the direct execution as fallback during transition
+        crate::evm::execute_tx(tx).map_err(|e| EthereumError::ExecutionError(e.to_string()))
     }
 
     /// Generate RISC-V execution trace (stub).

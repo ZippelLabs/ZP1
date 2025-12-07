@@ -5,9 +5,25 @@
 //!
 //! # Architecture
 //!
+//! Following industry standards (SP1, Risc0, OpenVM), EVM execution happens INSIDE
+//! the zkVM guest program, not on the host:
+//!
 //! ```text
-//! Ethereum Block → Transaction Batch → EVM Execution → RISC-V Trace → STARK Proof
+//! Host:
+//!   Fetch Block/Tx → Prepare Inputs → Execute Guest in zkVM → Extract Proof
+//!
+//! Guest (runs inside zkVM):
+//!   Read Inputs → Execute with Revm → Produce Results → Commit to Journal
+//!
+//! Flow:
+//!   Ethereum Block → Guest Program (Revm) → RISC-V Trace → STARK Proof
 //! ```
+//!
+//! ## Guest vs Host
+//!
+//! - **Guest** (`guest/`): Runs INSIDE zkVM, executes transactions with revm
+//! - **Host** (`src/`): Prepares data, invokes guest, generates proofs
+//! - **evm.rs**: Legacy direct execution (being phased out)
 //!
 //! # Usage
 //!
@@ -30,6 +46,8 @@ pub mod prover;
 pub mod transaction;
 pub mod aggregation;
 pub mod config;
+pub mod evm;
+pub mod guest_executor;
 
 pub use fetcher::{BlockFetcher, BlockData};
 pub use prover::{BlockProver, TransactionProver};

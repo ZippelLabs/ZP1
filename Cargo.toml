@@ -10,7 +10,7 @@ members = [
     "crates/delegation",
     "crates/ethereum",
     "crates/tests",
-    "crates/cli",
+    "crates/cli", "crates/zkvm",
 ]
 
 [workspace.package]

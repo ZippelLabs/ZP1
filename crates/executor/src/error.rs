@@ -49,6 +49,9 @@ pub enum ExecutorError {
     #[error("Division by zero at pc={pc:#x}")]
     DivisionByZero { pc: u32 },
 
+    #[error("Unknown syscall {syscall_code:#x} at pc={pc:#x}")]
+    UnknownSyscall { pc: u32, syscall_code: u32 },
+
     // === Normal Termination ===
 
     #[error("Execution halted: reached max steps ({max_steps})")]

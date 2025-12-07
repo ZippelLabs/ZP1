@@ -12,9 +12,11 @@ pub mod decode;
 pub mod trace;
 pub mod error;
 pub mod elf;
+pub mod syscall;
 
 pub use cpu::Cpu;
 pub use memory::Memory;
 pub use trace::{ExecutionTrace, TraceRow};
 pub use error::ExecutorError;
 pub use elf::ElfLoader;
+pub use syscall::SyscallCode;
