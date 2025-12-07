@@ -204,6 +204,12 @@ pub struct TraceColumns {
     pub lt_result: Vec<M31>,
     pub eq_result: Vec<M31>,
     pub branch_taken: Vec<M31>,
+    
+    // Bitwise operation bit decompositions (32 bits each)
+    // Following blake.rs pattern for XOR bit storage
+    pub and_bits: [Vec<M31>; 32],  // Bit decomposition of AND result
+    pub xor_bits: [Vec<M31>; 32],  // Bit decomposition of XOR result  
+    pub or_bits: [Vec<M31>; 32],   // Bit decomposition of OR result
 }
 
 impl TraceColumns {
@@ -287,6 +293,11 @@ impl TraceColumns {
             lt_result: Vec::new(),
             eq_result: Vec::new(),
             branch_taken: Vec::new(),
+            
+            // Initialize bit arrays (32 empty vectors for each operation)
+            and_bits: std::array::from_fn(|_| Vec::new()),
+            xor_bits: std::array::from_fn(|_| Vec::new()),
+            or_bits: std::array::from_fn(|_| Vec::new()),
         }
     }
 
@@ -548,6 +559,23 @@ impl TraceColumns {
                 if row.next_pc != row.pc.wrapping_add(4) { 1 } else { 0 }
             } else { 0 };
             cols.branch_taken.push(M31::new(branch_taken));
+            
+            // Bitwise operation bit decomposition (following blake.rs:264-296)
+            // Decompose results to bits for cryptographic verification
+            let and_result = rs1_val & rs2_val;
+            for i in 0..32 {
+                cols.and_bits[i].push(M31::new((and_result >> i) & 1));
+            }
+            
+            let xor_result = rs1_val ^ rs2_val;
+            for i in 0..32 {
+                cols.xor_bits[i].push(M31::new((xor_result >> i) & 1));
+            }
+            
+            let or_result = rs1_val | rs2_val;
+            for i in 0..32 {
+                cols.or_bits[i].push(M31::new((or_result >> i) & 1));
+            }
         }
 
         cols
@@ -655,6 +683,13 @@ impl TraceColumns {
         self.lt_result.resize(target, M31::ZERO);
         self.eq_result.resize(target, M31::ZERO);
         self.branch_taken.resize(target, M31::ZERO);
+        
+        // Pad bit arrays (32 bits each for AND/XOR/OR)
+        for i in 0..32 {
+            self.and_bits[i].resize(target, M31::ZERO);
+            self.xor_bits[i].resize(target, M31::ZERO);
+            self.or_bits[i].resize(target, M31::ZERO);
+        }
     }
 
     /// Convert to a vector of columns for the prover.
@@ -738,6 +773,12 @@ impl TraceColumns {
             self.eq_result.clone(),
             self.branch_taken.clone(),
         ]
+        .into_iter()
+        // Add bitwise bit decompositions (96 columns: 32 per operation)
+        .chain(self.and_bits.iter().map(|v| v.clone()))
+        .chain(self.xor_bits.iter().map(|v| v.clone()))
+        .chain(self.or_bits.iter().map(|v| v.clone()))
+        .collect()
     }
 }
 

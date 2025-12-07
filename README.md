@@ -33,10 +33,10 @@ primitives/   M31/QM31 fields, circle FFT, Merkle commitments
 executor/     RV32IM emulator with trace generation, ELF loader
 trace/        Execution trace to AIR columns
 air/          Constraint functions for all RV32IM instructions
-prover/       STARK prover, LDE, composition
+prover/       STARK prover, LDE, composition, GPU acceleration
 verifier/     FRI verification, DEEP queries
 delegation/   Precompile circuits (BLAKE2/3, U256)
-ethereum/     🆕 Ethereum block proving (framework ready)
+ethereum/     Ethereum block proving (framework ready)
 cli/          Command-line interface
 tests/        Integration tests
 ```
@@ -70,7 +70,17 @@ Generate STARK proofs for Ethereum block execution! The framework is ready:
 ```bash
 git clone https://github.com/this-vishalsingh/zp1
 cd zp1
+
+# CPU-only build
 cargo build --release
+
+# With CUDA support (Linux)
+cargo build --release --features cuda
+
+# With Metal support (macOS)
+cargo build --release --features metal
+
+# Run tests
 cargo test --workspace
 ```
 
@@ -205,11 +215,25 @@ cargo test -p zp1-tests         # Integration tests (16 passing)
 - ⏳ Performance benchmarking for large traces (>10K rows)
 - ⏳ External security audit
 
+## Documentation
+
+### Technical Documentation
+- **[USER_GUIDE.md](docs/USER_GUIDE.md)** - Getting started guide
+- **[ETHEREUM_INTEGRATION.md](docs/ETHEREUM_INTEGRATION.md)** - Ethereum proving
+- **[KECCAK_ACCELERATION.md](docs/KECCAK_ACCELERATION.md)** - Precompile delegation
+- **[ECRECOVER_ACCELERATION.md](docs/ECRECOVER_ACCELERATION.md)** - Signature verification
+
+### Performance & Benchmarks
+- **[BENCHMARKS.md](BENCHMARKS.md)** - Performance benchmarks
+- **[WORKING_DEMO.md](WORKING_DEMO.md)** - Live system demo
+
 ## References
 
 - [Circle STARKs](https://eprint.iacr.org/2024/278) - Haböck
 - [LogUp](https://eprint.iacr.org/2022/1530) - Lookup arguments
 - [RISC-V Spec](https://riscv.org/specifications/) - RV32IM
+- [SP1](https://github.com/succinctlabs/sp1) - Similar zkVM
+- [Risc0](https://github.com/risc0/risc0) - Similar zkVM
 
 ## License
 

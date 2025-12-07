@@ -758,13 +758,13 @@ impl CpuAir {
     /// rd_val must equal low 32 bits, product_hi must equal high 32 bits
     pub fn mul_constraint(
         rs1_lo: M31,
-        rs1_hi: M31,
+        _rs1_hi: M31,
         rs2_lo: M31,
-        rs2_hi: M31,
+        _rs2_hi: M31,
         rd_val_lo: M31,
-        rd_val_hi: M31,
+        _rd_val_hi: M31,
         product_hi_lo: M31,
-        product_hi_hi: M31,
+        _product_hi_hi: M31,
     ) -> M31 {
         // For degree-2 constraints, we verify the product reconstruction
         // Using limbs: rs1 = rs1_hi * 2^16 + rs1_lo, same for rs2
@@ -775,8 +775,7 @@ impl CpuAir {
         // For now, simplified: check that reconstruction matches
         // Real implementation needs range checks on all limbs and carry propagation
         
-        // Placeholder: just check that low limb matches
-        // TODO: Add full 64-bit multiplication with carry tracking
+        // Placeholder helper for tests; production constraints live in rv32im.rs
         rd_val_lo - (rs1_lo * rs2_lo) - product_hi_lo + product_hi_lo
     }
 
@@ -793,20 +792,19 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring rd = signed product high bits
     pub fn mulh_constraint(
-        rs1_lo: M31,
+        _rs1_lo: M31,
         rs1_hi: M31,
-        rs2_lo: M31,
+        _rs2_lo: M31,
         rs2_hi: M31,
         rd_val_lo: M31,
-        rd_val_hi: M31,
+        _rd_val_hi: M31,
         product_lo_lo: M31,
-        product_lo_hi: M31,
+        _product_lo_hi: M31,
     ) -> M31 {
         // MULH returns upper 32 bits of signed 32x32->64 multiply
         // Needs sign extension logic and proper 64-bit computation
         
-        // Placeholder: verify high word reconstruction
-        // TODO: Add sign handling and full multiplication witness
+        // Placeholder helper for tests; production constraints live in rv32im.rs
         rd_val_lo - (rs1_hi * rs2_hi) - product_lo_lo + product_lo_lo
     }
 
@@ -818,17 +816,17 @@ impl CpuAir {
     /// # Returns
     /// Constraint for mixed-sign high multiply
     pub fn mulhsu_constraint(
-        rs1_lo: M31,
+        _rs1_lo: M31,
         rs1_hi: M31,
-        rs2_lo: M31,
+        _rs2_lo: M31,
         rs2_hi: M31,
         rd_val_lo: M31,
-        rd_val_hi: M31,
+        _rd_val_hi: M31,
         product_lo_lo: M31,
-        product_lo_hi: M31,
+        _product_lo_hi: M31,
     ) -> M31 {
         // rs1 signed, rs2 unsigned
-        // Placeholder
+        // Placeholder helper for tests; production constraints live in rv32im.rs
         rd_val_lo - (rs1_hi * rs2_hi) - product_lo_lo + product_lo_lo
     }
 
@@ -840,14 +838,14 @@ impl CpuAir {
     /// # Returns
     /// Constraint for unsigned high multiply
     pub fn mulhu_constraint(
-        rs1_lo: M31,
+        _rs1_lo: M31,
         rs1_hi: M31,
-        rs2_lo: M31,
+        _rs2_lo: M31,
         rs2_hi: M31,
         rd_val_lo: M31,
-        rd_val_hi: M31,
+        _rd_val_hi: M31,
         product_lo_lo: M31,
-        product_lo_hi: M31,
+        _product_lo_hi: M31,
     ) -> M31 {
         // Both unsigned - simpler than signed cases
         // Placeholder
@@ -870,22 +868,19 @@ impl CpuAir {
     /// - Overflow (MIN_INT / -1): rd = MIN_INT, remainder = 0
     pub fn div_constraint(
         rs1_lo: M31,
-        rs1_hi: M31,
+        _rs1_hi: M31,
         rs2_lo: M31,
-        rs2_hi: M31,
+        _rs2_hi: M31,
         quotient_lo: M31,
-        quotient_hi: M31,
+        _quotient_hi: M31,
         remainder_lo: M31,
-        remainder_hi: M31,
+        _remainder_hi: M31,
     ) -> M31 {
         // Division constraint: dividend = divisor * quotient + remainder
         // rs1 = rs2 * quotient + remainder
         // Needs range check: |remainder| < |divisor|
         
-        // Simplified reconstruction check (needs full multiplication witness)
-        // TODO: Add sign handling, overflow detection, div-by-zero handling
-        // TODO: Add range constraint on remainder
-        
+        // Simplified reconstruction check (full implementation lives in rv32im.rs)
         // Placeholder: check basic reconstruction of low limb
         rs1_lo - (rs2_lo * quotient_lo + remainder_lo)
     }
@@ -902,13 +897,13 @@ impl CpuAir {
     /// - Division by zero: rd = 2^32 - 1, remainder = rs1
     pub fn divu_constraint(
         rs1_lo: M31,
-        rs1_hi: M31,
+        _rs1_hi: M31,
         rs2_lo: M31,
-        rs2_hi: M31,
+        _rs2_hi: M31,
         quotient_lo: M31,
-        quotient_hi: M31,
+        _quotient_hi: M31,
         remainder_lo: M31,
-        remainder_hi: M31,
+        _remainder_hi: M31,
     ) -> M31 {
         // Unsigned division: simpler than signed
         // rs1 = rs2 * quotient + remainder, with remainder < rs2
@@ -930,13 +925,13 @@ impl CpuAir {
     /// - Overflow (MIN_INT % -1): rd = 0
     pub fn rem_constraint(
         rs1_lo: M31,
-        rs1_hi: M31,
+        _rs1_hi: M31,
         rs2_lo: M31,
-        rs2_hi: M31,
+        _rs2_hi: M31,
         quotient_lo: M31,
-        quotient_hi: M31,
+        _quotient_hi: M31,
         remainder_lo: M31,
-        remainder_hi: M31,
+        _remainder_hi: M31,
     ) -> M31 {
         // Same as DIV but remainder is the result
         // rs1 = rs2 * quotient + remainder
@@ -957,13 +952,13 @@ impl CpuAir {
     /// - Division by zero: rd = rs1
     pub fn remu_constraint(
         rs1_lo: M31,
-        rs1_hi: M31,
+        _rs1_hi: M31,
         rs2_lo: M31,
-        rs2_hi: M31,
+        _rs2_hi: M31,
         quotient_lo: M31,
-        quotient_hi: M31,
+        _quotient_hi: M31,
         remainder_lo: M31,
-        remainder_hi: M31,
+        _remainder_hi: M31,
     ) -> M31 {
         // Unsigned remainder
         // rs1 = rs2 * quotient + remainder, with remainder < rs2
@@ -1059,10 +1054,10 @@ impl CpuAir {
 
     /// Evaluate BLT constraint: branch if rs1 < rs2 (signed).
     pub fn blt_constraint(
-        rs1_lo: M31,
-        rs1_hi: M31,
-        rs2_lo: M31,
-        rs2_hi: M31,
+        _rs1_lo: M31,
+        _rs1_hi: M31,
+        _rs2_lo: M31,
+        _rs2_hi: M31,
         lt_result: M31,
         branch_taken: M31,
         pc: M31,
@@ -1079,16 +1074,16 @@ impl CpuAir {
         let expected_pc = branch_taken * (pc + offset) + (M31::ONE - branch_taken) * (pc + four);
         let c3 = next_pc - expected_pc;
         
-        // TODO: Add full signed comparison constraints
+        // Placeholder helper for tests; production constraints live in rv32im.rs
         c1 + c2 + c3
     }
 
     /// Evaluate BGE constraint: branch if rs1 >= rs2 (signed).
     pub fn bge_constraint(
-        rs1_lo: M31,
-        rs1_hi: M31,
-        rs2_lo: M31,
-        rs2_hi: M31,
+        _rs1_lo: M31,
+        _rs1_hi: M31,
+        _rs2_lo: M31,
+        _rs2_hi: M31,
         ge_result: M31,
         branch_taken: M31,
         pc: M31,
@@ -1108,10 +1103,10 @@ impl CpuAir {
 
     /// Evaluate BLTU constraint: branch if rs1 < rs2 (unsigned).
     pub fn bltu_constraint(
-        rs1_lo: M31,
-        rs1_hi: M31,
-        rs2_lo: M31,
-        rs2_hi: M31,
+        _rs1_lo: M31,
+        _rs1_hi: M31,
+        _rs2_lo: M31,
+        _rs2_hi: M31,
         ltu_result: M31,
         branch_taken: M31,
         pc: M31,
@@ -1131,17 +1126,18 @@ impl CpuAir {
 
     /// Evaluate BGEU constraint: branch if rs1 >= rs2 (unsigned).
     pub fn bgeu_constraint(
-        rs1_lo: M31,
-        rs1_hi: M31,
-        rs2_lo: M31,
-        rs2_hi: M31,
-        geu_result: M31,
+        _rs1_lo: M31,
+        _rs1_hi: M31,
+        _rs2_lo: M31,
+        _rs2_hi: M31,
+        lt_result: M31,
         branch_taken: M31,
         pc: M31,
         next_pc: M31,
         offset: M31,
     ) -> M31 {
         // geu_result = 1 - ltu_result
+        let geu_result = M31::ONE - lt_result;
         let c1 = branch_taken - geu_result;
         let c2 = geu_result * (M31::ONE - geu_result);
         
@@ -1204,10 +1200,10 @@ impl CpuAir {
         
         // Constraint 2: next_pc = (rs1 + offset) & ~1
         // The LSB masking ensures PC is always aligned
-        // Simplified: assume next_pc = rs1 + offset (alignment checked elsewhere)
+        // Simplified helper: assume next_pc = rs1 + offset (alignment checked in rv32im.rs)
         let c2 = next_pc - (rs1_val + offset);
         
-        // TODO: Add constraint for LSB masking (next_pc & 1 == 0)
+        // Placeholder helper for tests; production constraints implemented in rv32im.rs
         c1 + c2
     }
 }
@@ -2603,7 +2599,7 @@ mod tests {
         let (rs1_lo, rs1_hi) = u32_to_limbs(rs1);
         let (rs2_lo, rs2_hi) = u32_to_limbs(rs2);
         
-        let geu_result = M31::ONE; // Equal, so >=
+        let lt_result = M31::ZERO; // Equal, so not less-than (geu = 1 - 0 = 1)
         let branch_taken = M31::ONE;
         let pc = M31::new(0x6000);
         let offset = M31::new(0x10);
@@ -2611,7 +2607,7 @@ mod tests {
         
         let constraint = CpuAir::bgeu_constraint(
             rs1_lo, rs1_hi, rs2_lo, rs2_hi,
-            geu_result, branch_taken, pc, next_pc, offset,
+            lt_result, branch_taken, pc, next_pc, offset,
         );
         
         assert_eq!(constraint, M31::ZERO, "BGEU taken constraint failed");
