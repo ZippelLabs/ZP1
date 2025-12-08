@@ -97,6 +97,8 @@ pub struct ProofConfig {
     pub fri_folding_factor: usize,
     /// Security level (bits).
     pub security_bits: usize,
+    /// Entry point PC value.
+    pub entry_point: u32,
 }
 
 /// Serializable verification key.
@@ -230,6 +232,7 @@ mod tests {
             num_queries: 50,
             fri_folding_factor: 4,
             security_bits: 100,
+            entry_point: 0x0,
         };
         
         let json = serde_json::to_string(&config).unwrap();
@@ -261,6 +264,7 @@ mod tests {
                 num_queries: 30,
                 fri_folding_factor: 2,
                 security_bits: 128,
+                entry_point: 0x0,
             },
             constraints_hash: [1u8; 32],
             public_inputs_hash: [2u8; 32],

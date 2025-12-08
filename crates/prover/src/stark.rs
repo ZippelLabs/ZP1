@@ -81,7 +81,7 @@ use crate::{
     lde::TraceLDE,
     fri::{FriConfig, FriProver, FriProof},
 };
-use zp1_primitives::{M31, QM31};
+use zp1_primitives::{M31, QM31, CirclePoint};
 use zp1_air::{CpuTraceRow, ConstraintEvaluator as AirConstraintEvaluator};
 
 /// Configuration for the STARK prover.

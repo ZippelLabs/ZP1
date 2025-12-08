@@ -141,6 +141,24 @@ impl TraceLDE {
     pub fn domain_size(&self) -> usize {
         self.domain.domain_size()
     }
+
+    /// Get the x-coordinate of a domain point.
+    /// Used for DEEP quotient construction.
+    #[inline]
+    pub fn get_domain_x(&self, index: usize) -> M31 {
+        self.domain.extended_point(index).x
+    }
+
+    /// Get the circle point at a domain index.
+    #[inline]
+    pub fn get_domain_point(&self, index: usize) -> CirclePoint {
+        self.domain.extended_point(index)
+    }
+
+    /// Get log of trace length.
+    pub fn log_trace_len(&self) -> usize {
+        self.domain.log_trace_len
+    }
 }
 
 #[cfg(test)]
