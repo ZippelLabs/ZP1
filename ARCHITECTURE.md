@@ -1,0 +1,166 @@
+# zp1 Architecture: High-Performance zkVM Design
+
+## 1. Executive Summary
+
+**zp1** is designed as a next-generation Zero-Knowledge Virtual Machine (zkVM) targeting specific performance metrics:
+-   **Proving Speed**: Maximized via small fields (Mersenne-31) and hardware acceleration (GPU/Metal).
+-   **Soundness**: Ensuring 128-bit security via QM31 extension and DEEP-ALI STARKs.
+-   **Developer Experience**: Standard RISC-V support allowing Rust/C++ guest programs.
+
+The system leverages **Circle STARKs** over the **Mersenne-31 (M31)** field, which allows for highly efficient arithmetic on standard CPUs/GPUs while avoiding the overhead of larger prime fields (like Goldilocks or BabyBear) or elliptic curves (like BN254).
+
+---
+
+## 2. System Architecture Overview
+
+The system follows a standard **Compiler -> VM -> Prover -> Verifier** pipeline.
+
+### Mind Map: Component Hierarchy
+
+```mermaid
+mindmap
+  root((zp1 zkVM))
+    Guest [Guest Framework]
+      SDK [Rust SDK / no_std]
+      Syscalls [Syscalls & I/O]
+      Panic [Panic Handling]
+    Host [Host Runtime]
+      ELF [ELF Loader]
+      Executor [trace generation]
+      Segmenter [Trace Splitting]
+    Core [Core Primitives]
+      Field [Mersenne-31 / QM31]
+      Circle [Circle Group / FFT]
+      Poly [Polynomials]
+    Prover [STARK Prover]
+      AIR [AIR Constraints]
+      LDE [Low Degree Extension]
+      Commit [Merkle Tree / FRI]
+      LogUp [Lookup Arguments]
+      GPU [Metal / CUDA Backend]
+    Verifier [Verifier]
+      STARK [STARK Verifier]
+      Recursion [Proof Compression]
+```
+
+---
+
+## 3. Detailed Data Flow Architecture
+
+The data flow moves from a high-level Rust program to a verifiable cryptographic proof.
+
+```mermaid
+graph TD
+    %% Nodes
+    UserCode[("User Code (Rust/C++)")]
+    Compiler[("Riscy Compiler (LLVM/Rustc)")]
+    ELF[("RISC-V ELF Binary")]
+    
+    subgraph Host Runtime
+        Loader[("ELF Loader")]
+        Executor[("Executor")]
+        TraceGen[("Trace Generator")]
+        
+        Loader --> Executor
+        Executor --> TraceGen
+    end
+    
+    subgraph Core Prover
+        TraceCols[("Trace Columns")]
+        LDE[("LDE (Circle FFT)")]
+        Constraints[("AIR Constraints")]
+        Quotient[("DEEP Quotient")]
+        FRI[("FRI Protocol")]
+        
+        TraceGen --> TraceCols
+        TraceCols --> LDE
+        LDE --> Quotient
+        Constraints --> Quotient
+        Quotient --> FRI
+    end
+    
+    subgraph Constraint System
+        CPU[("CPU Constraints")]
+        Mem[("Memory Constraints")]
+        Bitwise[("Bitwise Lookups")]
+        
+        TraceCols -.-> CPU
+        TraceCols -.-> Mem
+        TraceCols -.-> Bitwise
+    end
+
+    Proof[("STARK Proof")]
+    Verifier[("Verifier")]
+
+    %% Edges
+    UserCode --> Compiler
+    Compiler --> ELF
+    ELF --> Loader
+    FRI --> Proof
+    Proof --> Verifier
+    
+    style UserCode fill:#e1f5fe,stroke:#01579b
+    style Proof fill:#dcedc8,stroke:#33691e
+    style Core Prover fill:#fff3e0,stroke:#e65100
+```
+
+---
+
+## 4. Key Architectural Decisions & Logic
+
+### 4.1. The Field Choice: Mersenne-31 (M31)
+**Why?**
+-   **Performance**: M31 ($2^{31}-1$) fits perfectly into a 32-bit register. Addition is a simple integer add with a conditional subtract (or bitwise AND). Multiplication fits in a 64-bit word before reduction. This makes it significantly faster than Goldilocks ($2^{64}-2^{32}+1$) or BabyBear on 32-bit/64-bit hardware.
+-   **GPU Friendly**: GPUs excel at 32-bit arithmetic. M31 is native to GPU ALUs.
+
+**Implication**:
+-   Conventional FFTs require domains of size $2^n$. M31 is a Mersenne prime, so $M31 - 1$ is not highly divisible by 2. We cannot use standard FFTs efficiently.
+-   **Solution**: **Circle FFT**. We work over the circle group $x^2 + y^2 = 1$ in M31. This group has size $2^{31}$, allowing efficient FFTs of any power-of-two size.
+
+### 4.2. Lookup Arguments: LogUp vs. Lasso
+**Current State**: The system uses `LogUp`.
+**Constraint Logic**:
+-   Instead of proving every bitwise operation (AND, XOR) with expensive polynomial equations (e.g., $a \cdot (1-a) = 0$ for 32 bits), we use **Lookup Tables**.
+-   We compute $a \oplus b = c$. We check if the tuple $(a, b, c)$ exists in a precomputed "XOR Table".
+-   **LogUp** converts this lookup check into a sum of rational functions: $\sum \frac{1}{x - t_i} = \sum \frac{m_i}{x - T_i}$.
+-   **Optimization**: This dramatically reduces degree of constraints for bitwise operations, which are dominant in SHA-256 and Keccak.
+
+### 4.3. Precompiles & Acceleration
+**Design Goal**: syscalls for heavy crypto.
+-   Instead of running SHA-256 as 10,000 RISC-V instructions, the VM traps the execution.
+-   The **Executor** computes the hash natively.
+-   A dedicated **Chip (Table)** is filled with the input/output trace of the hash.
+-   The **Prover** proves the Chip validity separately and connects it to the main CPU bus via Lookups.
+
+---
+
+## 5. Logical Gap Analysis: Improvements Needed
+
+| Feature | Current Status | Recommended Upgrade | Why? |
+| :--- | :--- | :--- | :--- |
+| **Bitwise Ops** | Polynomial Constraints | **Bitwise Tables (Lookups)** | Current `rv32im.rs` bit logic is expensive (degree increases or many columns). Global Lookup tables for 8/16-bit logic Ops reduces trace cost. |
+| **Recursion** | `snark` wrappers exist | **Segmented STARK Recursion** | To prove long programs, split trace into N segments. Recursively prove each segment into a single proof. |
+| **Memory** | Basic consistency | **Paged Memory / Write-once** | For massive memory usage, simpler access patterns or "memory-as-external-lookup" can save constraints. |
+| **Precompiles** | Syscall traits present | **Dedicated AIR Chips** | Implement distinct AIR constraints for Keccak/Poseidon. This is the single biggest speedup for ZK applications. |
+
+---
+
+## 6. Visualizing the "Circle STARK" Logic
+
+Why Circle STARKs specifically?
+
+```mermaid
+graph LR
+    subgraph Traditional STARK
+        F[("Field Fp")] --> |"Multiplicative Subgroup"| D[("Domain size 2^n")]
+        D --> |"Requires p-1 divisible by 2^n"| Limit["Limits Field Choice"]
+    end
+    
+    subgraph Circle STARK
+        M31[("Mersenne 31")] --> |"Circle Group x^2+y^2=1"| C[("Circle Domain")]
+        C --> |"Size = p+1 = 2^31"| Anypow[("Fits ANY power of 2")]
+        Anypow --> |"Fast Arithmetic"| Speed["Max Performance"]
+    end
+```
+
+Using M31 allows the absolute fastest integer math on CPUs/GPUs, but breaks traditional FFTs. The **Circle STARK** construction restores the FFT ability via the geometry of the circle, giving us the "Holy Grail" of small fields + efficient FFTs.
