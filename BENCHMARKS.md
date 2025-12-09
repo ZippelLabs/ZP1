@@ -66,6 +66,41 @@ Comparing bit-based (32 iterations) vs lookup-based (4 iterations) constraint ev
 
 The lookup-based approach uses byte decomposition (4 bytes) instead of bit decomposition (32 bits), reducing constraint iterations by 87.5% and achieving 8-10x speedup.
 
+### M31 Field Operations & Poseidon2 S-Box
+
+M31 (Mersenne-31) field arithmetic benchmarks and Poseidon2 sbox candidate comparison.
+
+**Run with:** `cargo bench -p zp1-primitives --bench m31_sbox`
+
+#### Field Operations
+
+| Operation | Time (avg) |
+|-----------|------------|
+| Add       | ~555 ps    |
+| Mul       | ~625 ps    |
+| Square    | ~504 ps    |
+| Inverse   | ~86 ns     |
+
+#### Poseidon2 S-Box Candidates
+
+Comparing M31's required $x^5$ sbox vs cheaper $x^3$ (possible on Koalabear/BabyBear):
+
+| S-Box   | Time (single) | Batch (1000) | Overhead |
+|---------|---------------|--------------|----------|
+| $x^3$   | ~0.93 ns      | ~1.05 µs     | baseline |
+| $x^5$   | ~1.66 ns      | ~1.66 µs     | **1.8x** |
+| $x^7$   | ~2.56 ns      | ~2.59 µs     | **2.7x** |
+
+#### Poseidon2 Round Simulation (width=12)
+
+| S-Box   | Time/Round |
+|---------|------------|
+| $x^3$   | ~14.8 ns   |
+| $x^5$   | ~14.5 ns   |
+| $x^7$   | ~18.9 ns   |
+
+> **Analysis**: M31 requires $x^5$ for Poseidon2 security, costing ~1.8x more per sbox than Koalabear's $x^3$. However, full round times are similar because the MDS matrix dominates. The net overhead is **~10-15%** per Poseidon2 permutation, a reasonable trade-off for M31's superior base field efficiency.
+
 ### ECRECOVER (Ethereum Signature Recovery)
 
 - **Signature Recovery**: ~85-100 µs per operation

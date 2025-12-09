@@ -17,3 +17,8 @@ p3-matrix = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+criterion = "0.5"
+
+[[bench]]
+name = "m31_sbox"
+harness = false
