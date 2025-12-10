@@ -13,6 +13,15 @@ sha2 = "0.10"
 ripemd = "0.1"
 blake2 = "0.10"
 
+# New signature schemes
+ed25519-dalek = { version = "2.1", optional = true }
+p256 = { version = "0.13", features = ["ecdsa"], optional = true }
+
+[features]
+default = ["ed25519", "secp256r1"]
+ed25519 = ["ed25519-dalek"]
+secp256r1 = ["p256"]
+
 [dev-dependencies]
 rand = { workspace = true }
 hex = "0.4"
