@@ -6,7 +6,7 @@
 
 ---
 
-## 🎯 Actual ETH Block Proving Result
+## Actual ETH Block Proving Result
 
 **Block 23,232,323** proved successfully on M4 Mac:
 
@@ -26,7 +26,7 @@
   --output-dir ./proofs
 
 # Output:
-# ✅ Block proof generated successfully!
+# Block proof generated successfully!
 #    Block: 23232323
 #    Transactions: 421
 #    Total gas: 10595634
@@ -210,13 +210,13 @@ Based on data from [ethproofs.org](https://ethproofs.org/csp-benchmarks) and pub
 
 | zkVM | Hardware | Block Time | Status |
 |------|----------|------------|--------|
-| **SP1 Hypercube** | 16x RTX 5090 (~$100k) | **~12 sec** | Real-time ✅ |
-| **ZKsync Airbender** | 1x RTX 4090 | **~35 sec** | Near real-time ⚡ |
+| **SP1 Hypercube** | 16x RTX 5090 (~$100k) | **~12 sec** | Real-time |
+| **ZKsync Airbender** | 1x RTX 4090 | **~35 sec** | Near real-time |
 | **ZisK** | 1x RTX 4090 | ~45 sec | Near real-time |
 | **SP1 Turbo** | 1x RTX 4090 | ~60 sec | Production |
 | **OpenVM** | Flexible | ~90 sec | Modular |
 | **Ziren** | 1x RTX 4090 | ~120 sec | Experimental |
-| **zp1 (actual)** | **M4 Mac** | **10.58 sec** ✅ | Development |
+| **zp1 (actual)** | **M4 Mac** | **10.58 sec** | Development |
 
 ### Cost per Proof
 
@@ -266,15 +266,15 @@ To reach <60s on M4 Mac:
 
 ## CSP Benchmark Leaderboard
 
-### Real-Time (<12s) 🏆
+### Real-Time (<12s)
 - SP1 Hypercube (16x RTX 5090)
 
-### Near Real-Time (<60s) ⚡
+### Near Real-Time (<60s)
 - ZKsync Airbender (1x RTX 4090) - **Winner for single GPU**
 - ZisK (1x RTX 4090)  
 - SP1 Turbo (1x RTX 4090)
 
-### Development (<5min) ⚙️
+### Development (<5min)
 - OpenVM (Flexible)
 - Ziren (1x RTX 4090)
 - **zp1 (M4 Mac)** - **Winner for cost efficiency**
