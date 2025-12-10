@@ -48,6 +48,7 @@ pub mod aggregation;
 pub mod config;
 pub mod evm;
 pub mod guest_executor;
+pub mod rpc_db;
 
 pub use fetcher::{BlockFetcher, BlockData};
 pub use prover::{BlockProver, TransactionProver};

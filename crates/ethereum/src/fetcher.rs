@@ -7,7 +7,7 @@ use ethers::{
 use serde::{Serialize, Deserialize};
 use crate::{Result, EthereumError};
 
-/// Ethereum block fetcher.
+/// Ethereum block fetcher with state access.
 pub struct BlockFetcher {
     provider: Provider<Http>,
 }
@@ -18,6 +18,11 @@ impl BlockFetcher {
         let provider = Provider::<Http>::try_from(rpc_url)
             .map_err(|e| EthereumError::BlockFetchError(format!("Invalid RPC URL: {}", e)))?;
         Ok(Self { provider })
+    }
+    
+    /// Get the RPC provider reference.
+    pub fn provider(&self) -> &Provider<Http> {
+        &self.provider
     }
 
     /// Fetch a block by number with all transactions.
@@ -56,6 +61,34 @@ impl BlockFetcher {
             .ok_or_else(|| EthereumError::BlockFetchError(
                 format!("Transaction {:?} not found", tx_hash)
             ))
+    }
+    
+    // =========================================================================
+    // ACCOUNT STATE FETCHING
+    // =========================================================================
+    
+    /// Fetch account balance at a specific block.
+    pub async fn get_balance(&self, address: ethers::types::Address, block: Option<u64>) -> Result<ethers::types::U256> {
+        let block_id = block.map(|b| ethers::types::BlockId::Number(ethers::types::BlockNumber::Number(U64::from(b))));
+        Ok(self.provider.get_balance(address, block_id).await?)
+    }
+    
+    /// Fetch account nonce at a specific block.
+    pub async fn get_nonce(&self, address: ethers::types::Address, block: Option<u64>) -> Result<u64> {
+        let block_id = block.map(|b| ethers::types::BlockId::Number(ethers::types::BlockNumber::Number(U64::from(b))));
+        Ok(self.provider.get_transaction_count(address, block_id).await?.as_u64())
+    }
+    
+    /// Fetch contract code at a specific block.
+    pub async fn get_code(&self, address: ethers::types::Address, block: Option<u64>) -> Result<Vec<u8>> {
+        let block_id = block.map(|b| ethers::types::BlockId::Number(ethers::types::BlockNumber::Number(U64::from(b))));
+        Ok(self.provider.get_code(address, block_id).await?.to_vec())
+    }
+    
+    /// Fetch storage slot value at a specific block.
+    pub async fn get_storage_at(&self, address: ethers::types::Address, slot: H256, block: Option<u64>) -> Result<H256> {
+        let block_id = block.map(|b| ethers::types::BlockId::Number(ethers::types::BlockNumber::Number(U64::from(b))));
+        Ok(self.provider.get_storage_at(address, slot, block_id).await?)
     }
 }
 
