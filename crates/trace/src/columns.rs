@@ -844,6 +844,161 @@ impl TraceColumns {
         .chain(self.xor_result_bytes.iter().map(|v| v.clone()))
         .collect()
     }
+    
+    // =========================================================================
+    // MEMORY-EFFICIENT ACCESS METHODS
+    // These methods avoid cloning data, reducing memory usage by ~50%
+    // =========================================================================
+    
+    /// Convert to columns by taking ownership (no cloning).
+    /// 
+    /// This is 2x more memory-efficient than `to_columns()` because it
+    /// moves the data instead of cloning it. Use this when you don't need
+    /// to keep the TraceColumns after conversion.
+    /// 
+    /// # Example
+    /// ```ignore
+    /// let columns = trace.into_columns(); // trace is consumed
+    /// ```
+    pub fn into_columns(self) -> Vec<Vec<M31>> {
+        let mut result = Vec::with_capacity(NUM_CPU_COLUMNS);
+        
+        // Core columns (moved, not cloned)
+        result.push(self.clk);
+        result.push(self.pc);
+        result.push(self.next_pc);
+        result.push(self.instr);
+        result.push(self.opcode);
+        result.push(self.rd);
+        result.push(self.rs1);
+        result.push(self.rs2);
+        result.push(self.imm_lo);
+        result.push(self.imm_hi);
+        result.push(self.rd_val_lo);
+        result.push(self.rd_val_hi);
+        result.push(self.rs1_val_lo);
+        result.push(self.rs1_val_hi);
+        result.push(self.rs2_val_lo);
+        result.push(self.rs2_val_hi);
+        result.push(self.is_add);
+        result.push(self.is_sub);
+        result.push(self.is_and);
+        result.push(self.is_or);
+        result.push(self.is_xor);
+        result.push(self.is_sll);
+        result.push(self.is_srl);
+        result.push(self.is_sra);
+        result.push(self.is_slt);
+        result.push(self.is_sltu);
+        result.push(self.is_addi);
+        result.push(self.is_andi);
+        result.push(self.is_ori);
+        result.push(self.is_xori);
+        result.push(self.is_slti);
+        result.push(self.is_sltiu);
+        result.push(self.is_slli);
+        result.push(self.is_srli);
+        result.push(self.is_srai);
+        result.push(self.is_lui);
+        result.push(self.is_auipc);
+        result.push(self.is_beq);
+        result.push(self.is_bne);
+        result.push(self.is_blt);
+        result.push(self.is_bge);
+        result.push(self.is_bltu);
+        result.push(self.is_bgeu);
+        result.push(self.is_jal);
+        result.push(self.is_jalr);
+        result.push(self.is_mul);
+        result.push(self.is_mulh);
+        result.push(self.is_mulhsu);
+        result.push(self.is_mulhu);
+        result.push(self.is_div);
+        result.push(self.is_divu);
+        result.push(self.is_rem);
+        result.push(self.is_remu);
+        result.push(self.is_lb);
+        result.push(self.is_lbu);
+        result.push(self.is_lh);
+        result.push(self.is_lhu);
+        result.push(self.is_lw);
+        result.push(self.is_sb);
+        result.push(self.is_sh);
+        result.push(self.is_sw);
+        result.push(self.mem_addr_lo);
+        result.push(self.mem_addr_hi);
+        result.push(self.mem_val_lo);
+        result.push(self.mem_val_hi);
+        result.push(self.sb_carry);
+        result.push(self.mul_lo);
+        result.push(self.mul_hi);
+        result.push(self.carry);
+        result.push(self.borrow);
+        result.push(self.quotient_lo);
+        result.push(self.quotient_hi);
+        result.push(self.remainder_lo);
+        result.push(self.remainder_hi);
+        result.push(self.lt_result);
+        result.push(self.eq_result);
+        result.push(self.branch_taken);
+        
+        // Bit columns
+        for col in self.rs1_bits { result.push(col); }
+        for col in self.rs2_bits { result.push(col); }
+        for col in self.imm_bits { result.push(col); }
+        for col in self.and_bits { result.push(col); }
+        for col in self.xor_bits { result.push(col); }
+        for col in self.or_bits { result.push(col); }
+        
+        // Byte columns
+        for col in self.rs1_bytes { result.push(col); }
+        for col in self.rs2_bytes { result.push(col); }
+        for col in self.and_result_bytes { result.push(col); }
+        for col in self.or_result_bytes { result.push(col); }
+        for col in self.xor_result_bytes { result.push(col); }
+        
+        result
+    }
+    
+    /// Estimate memory usage in bytes.
+    /// 
+    /// Useful for monitoring and deciding when to use streaming.
+    pub fn memory_usage(&self) -> usize {
+        let rows = self.len();
+        let m31_size = std::mem::size_of::<M31>();
+        
+        // Count all columns
+        let base_cols = 77; // Base trace columns
+        let bit_cols = 32 * 6; // 6 bit arrays × 32 bits
+        let byte_cols = 4 * 5; // 5 byte arrays × 4 bytes
+        let total_cols = base_cols + bit_cols + byte_cols;
+        
+        rows * m31_size * total_cols
+    }
+    
+    /// Estimate memory usage in MB.
+    pub fn memory_usage_mb(&self) -> f64 {
+        self.memory_usage() as f64 / (1024.0 * 1024.0)
+    }
+    
+    /// Check if trace fits in available memory with given margin.
+    /// 
+    /// Returns true if estimated memory usage is less than (available_mb - margin_mb).
+    pub fn fits_in_memory(&self, available_mb: f64, margin_mb: f64) -> bool {
+        self.memory_usage_mb() < (available_mb - margin_mb)
+    }
+    
+    /// Get the number of rows that would fit in given memory budget.
+    /// 
+    /// Useful for chunking large traces.
+    pub fn rows_for_memory_budget(memory_mb: f64) -> usize {
+        let m31_size = std::mem::size_of::<M31>();
+        let total_cols = 77 + 32 * 6 + 4 * 5; // 269 columns
+        let bytes_per_row = m31_size * total_cols;
+        
+        let memory_bytes = (memory_mb * 1024.0 * 1024.0) as usize;
+        memory_bytes / bytes_per_row
+    }
 }
 
 impl Default for TraceColumns {
@@ -851,3 +1006,42 @@ impl Default for TraceColumns {
         Self::new()
     }
 }
+
+// ============================================================================
+// STREAMING TRACE BUILDER
+// For processing large traces that don't fit in memory
+// ============================================================================
+
+/// Configuration for streaming trace processing.
+#[derive(Clone, Debug)]
+pub struct StreamingConfig {
+    /// Maximum rows to process at once
+    pub chunk_size: usize,
+    /// Memory budget in MB
+    pub memory_budget_mb: f64,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            chunk_size: TraceColumns::rows_for_memory_budget(1024.0), // 1GB default
+            memory_budget_mb: 1024.0,
+        }
+    }
+}
+
+impl StreamingConfig {
+    /// Create config for specific memory budget.
+    pub fn with_memory_mb(memory_mb: f64) -> Self {
+        Self {
+            chunk_size: TraceColumns::rows_for_memory_budget(memory_mb),
+            memory_budget_mb: memory_mb,
+        }
+    }
+    
+    /// Create config for M4 Mac with 24GB RAM (leaves 8GB for system).
+    pub fn for_m4_mac() -> Self {
+        Self::with_memory_mb(16.0 * 1024.0) // 16GB for prover
+    }
+}
+
