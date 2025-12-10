@@ -28,10 +28,21 @@ pub fn execute_tx(tx: &TransactionData) -> anyhow::Result<TransactionResult> {
     // In a real scenario, we would load state from a provider or disk
     let mut db = CacheDB::new(EmptyDB::default());
     
-    // Setup sender account with some balance so they can pay for gas
+    // Calculate required balance: gas_limit * gas_price + value + buffer
+    // For EIP-1559, gas_price might be max_fee_per_gas which can be very high
+    let gas_cost = if let Some(price) = tx.gas_price {
+        to_revm_u256(price) * RevmU256::from(tx.gas)
+    } else {
+        RevmU256::from(tx.gas) * RevmU256::from(100_000_000_000u64) // 100 gwei fallback
+    };
+    let tx_value = to_revm_u256(tx.value);
+    // Add extra buffer (100 ETH) to ensure no balance issues
+    let required_balance = gas_cost + tx_value + RevmU256::from(100_000_000_000_000_000_000u128);
+    
+    // Setup sender account with sufficient balance to pay for gas + value
     let sender = to_revm_address(tx.from);
     let sender_info = AccountInfo {
-        balance: RevmU256::from(10_000_000_000_000_000_000u128), // 10 ETH
+        balance: required_balance,
         nonce: tx.nonce,
         code_hash: RevmU256::ZERO.into(), // Empty code hash
         code: None,
@@ -80,6 +91,96 @@ pub fn execute_tx(tx: &TransactionData) -> anyhow::Result<TransactionResult> {
     // In a real implementation, we would inspect the State returned by transact()
     // But transact_commit() consumes it. 
     // For now, we'll return an empty list of state changes as we are using EmptyDB
+    let state_changes = Vec::new();
+
+    Ok(TransactionResult {
+        hash: tx.hash,
+        gas_used,
+        success,
+        return_data,
+        state_changes,
+    })
+}
+
+/// Execute a transaction using Revm with RPC-backed state.
+/// 
+/// This fetches real account balances, nonces, and contract code from the RPC.
+pub fn execute_tx_with_rpc(
+    tx: &TransactionData,
+    rpc_url: &str,
+    block_number: Option<u64>,
+) -> anyhow::Result<TransactionResult> {
+    use crate::rpc_db::RpcDb;
+    use revm::db::CacheDB;
+    
+    // Create RPC-backed database
+    let rpc_db = RpcDb::from_rpc_url(rpc_url, block_number)
+        .map_err(|e| anyhow::anyhow!("RPC DB error: {}", e))?;
+    
+    // Wrap in CacheDB for better performance
+    let mut db = CacheDB::new(rpc_db);
+    
+    // For contract calls, we also need to ensure the sender has enough balance
+    // The RPC will fetch the real balance, but we might need to override it
+    // for simulation purposes
+    let sender = to_revm_address(tx.from);
+    
+    // Calculate required balance for this tx
+    let gas_cost = if let Some(price) = tx.gas_price {
+        to_revm_u256(price) * RevmU256::from(tx.gas)
+    } else {
+        RevmU256::from(tx.gas) * RevmU256::from(100_000_000_000u64)
+    };
+    let tx_value = to_revm_u256(tx.value);
+    let required = gas_cost + tx_value;
+    
+    // Insert sender with sufficient balance if needed
+    // This is a simulation - we assume sender can pay
+    let sender_info = AccountInfo {
+        balance: required + RevmU256::from(100_000_000_000_000_000_000u128),
+        nonce: tx.nonce,
+        code_hash: RevmU256::ZERO.into(),
+        code: None,
+    };
+    db.insert_account_info(sender, sender_info);
+    
+    let mut evm = EVM::new();
+    evm.database(db);
+
+    // Configure transaction
+    evm.env.tx.caller = sender;
+    evm.env.tx.transact_to = if let Some(to) = tx.to {
+        TransactTo::Call(to_revm_address(to))
+    } else {
+        TransactTo::Create(CreateScheme::Create)
+    };
+    evm.env.tx.data = Bytes::from(tx.input.clone());
+    evm.env.tx.value = to_revm_u256(tx.value);
+    evm.env.tx.gas_limit = tx.gas;
+    if let Some(price) = tx.gas_price {
+        evm.env.tx.gas_price = to_revm_u256(price);
+    }
+
+    // Execute
+    let result = evm.transact_commit()?;
+
+    // Process result
+    let (success, return_data, gas_used) = match result {
+        ExecutionResult::Success { output, gas_used, .. } => {
+            let data = match output {
+                Output::Call(bytes) => bytes.to_vec(),
+                Output::Create(bytes, _) => bytes.to_vec(),
+            };
+            (true, data, gas_used)
+        }
+        ExecutionResult::Revert { output, gas_used } => {
+            (false, output.to_vec(), gas_used)
+        }
+        ExecutionResult::Halt { reason: _, gas_used } => {
+            (false, vec![], gas_used)
+        }
+    };
+
     let state_changes = Vec::new();
 
     Ok(TransactionResult {
