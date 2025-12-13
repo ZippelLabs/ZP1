@@ -1269,37 +1269,59 @@ impl CpuAir {
         constraints
     }
 
-    /// Evaluate DIV constraint: rd = rs1 / rs2 (signed division, round toward zero).
+    /// Evaluate DIV constraint: rd = rs1 / rs2 (signed division).
     ///
     /// # Arguments
-    /// * `rs1_lo/hi` - Dividend limbs (signed)
-    /// * `rs2_lo/hi` - Divisor limbs (signed)
-    /// * `rd_val_lo/hi` - Quotient limbs
-    /// * `remainder_lo/hi` - Remainder limbs (witness)
+    /// * `rs1_lo/hi` - Dividend limbs (Signed)
+    /// * `rs2_lo/hi` - Divisor limbs (Signed)
+    /// * `quot_lo/hi` - Quotient limbs (Result)
+    /// * `rem_lo/hi` - Remainder limbs (Witness)
+    /// * `prod_lo_lo/hi` - Low 32 bits of (divisor * quotient) (Witness)
+    /// * `carry_0/1` - Carries for (divisor * quotient) (Witness)
+    /// * `carry_sum_lo` - Carry for low 16-bit addition (prod_lo + rem_lo) (Witness)
+    /// * `k_overflow` - Overflow for high 16-bit addition (Witness)
     ///
     /// # Returns
-    /// Constraint: rs1 = rs2 * rd + remainder, with |remainder| < |rs2|
-    ///
-    /// # Special Cases
-    /// - Division by zero: rd = -1, remainder = rs1
-    /// - Overflow (MIN_INT / -1): rd = MIN_INT, remainder = 0
+    /// Constraints ensuring `rs1 = rs2 * quotient + remainder` (Low 32 bits check).
     pub fn div_constraint(
-        rs1_lo: M31,
-        _rs1_hi: M31,
-        rs2_lo: M31,
-        _rs2_hi: M31,
-        quotient_lo: M31,
-        _quotient_hi: M31,
-        remainder_lo: M31,
-        _remainder_hi: M31,
-    ) -> M31 {
-        // Division constraint: dividend = divisor * quotient + remainder
-        // rs1 = rs2 * quotient + remainder
-        // Needs range check: |remainder| < |divisor|
+        rs1_lo: M31, rs1_hi: M31,
+        rs2_lo: M31, rs2_hi: M31,
+        quot_lo: M31, quot_hi: M31,
+        rem_lo: M31, rem_hi: M31,
+        // Witnesses for rs2 * quot
+        prod_lo_lo: M31, prod_lo_hi: M31,
+        carry_0: M31, carry_1: M31,
+        // Witnesses for addition
+        carry_sum_lo: M31,
+        k_overflow: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+        let base = M31::new(65536);
+
+        // 1. Verify LOW part of (rs2 * quot)
+        // rs2_lo * quot_lo = P_lo + c0 * B
+        constraints.push(rs2_lo * quot_lo - (prod_lo_lo + carry_0 * base));
+
+        // rs2_lo * quot_hi + rs2_hi * quot_lo + c0 = P_md + c1 * B
+        constraints.push(
+            (rs2_lo * quot_hi + rs2_hi * quot_lo + carry_0) - (prod_lo_hi + carry_1 * base)
+        );
+
+        // 2. Reconstruct check: rs1 = (rs2 * quot) + rem
+        // rs1_lo + rs1_hi*B = (prod_lo + rem_lo) + B*(prod_hi + rem_hi)
         
-        // Simplified reconstruction check (full implementation lives in rv32im.rs)
-        // Placeholder: check basic reconstruction of low limb
-        rs1_lo - (rs2_lo * quotient_lo + remainder_lo)
+        // Low part addition: prod_lo_lo + rem_lo = rs1_lo + carry_sum_lo * B
+        constraints.push(
+            (prod_lo_lo + rem_lo) - (rs1_lo + carry_sum_lo * base)
+        );
+
+        // High part addition: prod_lo_hi + rem_hi + carry_sum_lo = rs1_hi + k_overflow * B
+        // (This k_overflow handles the 32-bit overflow)
+        constraints.push(
+            (prod_lo_hi + rem_hi + carry_sum_lo) - (rs1_hi + k_overflow * base)
+        );
+
+        constraints
     }
 
     /// Evaluate DIVU constraint: rd = rs1 / rs2 (unsigned division).
@@ -3235,7 +3257,40 @@ mod tests {
         let (quot_lo, quot_hi) = u32_to_limbs(quotient);
         let (rem_lo, rem_hi) = u32_to_limbs(remainder);
 
-        let constraint = CpuAir::div_constraint(
+        // Calc prod = rs2 * quot
+        let prod_full = (rs2 as u64) * (quotient as u64);
+        let prod_lo = (prod_full & 0xFFFFFFFF) as u32;
+        let (prod_lo_lo, prod_lo_hi) = u32_to_limbs(prod_lo);
+
+        // Calc mul carries
+        let t0 = (rs2_lo.as_u32() as u64) * (quot_lo.as_u32() as u64);
+        let carry_0 = M31::new(((t0 >> 16) & 0xFFFF) as u32);
+        let t1 = (rs2_lo.as_u32() as u64) * (quot_hi.as_u32() as u64) +
+                 (rs2_hi.as_u32() as u64) * (quot_lo.as_u32() as u64) +
+                 (carry_0.as_u32() as u64);
+        let carry_1 = M31::new((t1 >> 16) as u32);
+
+        // Calc add carries for prod_lo + rem = rs1 mod 2^32
+        // low: prod_lo_lo + rem_lo = rs1_lo + k0 * 2^16
+        // sum0 = prod_lo_lo + rem_lo. 
+        // carry_sum_lo = (sum0 - rs1_lo) / 65536 check? 
+        // Or simply carry_sum_lo = sum0 >> 16? No, rs1_lo is the result bits.
+        // Formula: sum_lo = rs1_lo + carry * B.
+        // carry = (prod_lo_lo + rem_lo - rs1_lo) / 65536. (Conceptually)
+        // Or just `(prod_lo_lo + rem_lo) >> 16`? 
+        // No, `rs1_lo` is `(prod_lo_lo + rem_lo) & 0xFFFF`.
+        // So `carry` is indeed `(prod_lo_lo + rem_lo) >> 16`.
+        let sum_lo = prod_lo_lo.as_u32() + rem_lo.as_u32();
+        let carry_sum_lo = M31::new(sum_lo >> 16);
+
+        // high: prod_lo_hi + rem_hi + carry_sum_lo = rs1_hi + k_over * B
+        let sum_hi = prod_lo_hi.as_u32() + rem_hi.as_u32() + carry_sum_lo.as_u32();
+        // k_overflow = (sum_hi - rs1_hi) / 65536
+        // Or `sum_hi >> 16`?
+        // Yes, `rs1_hi = sum_hi & 0xFFFF`.
+        let k_overflow = M31::new(sum_hi >> 16);
+
+        let constraints = CpuAir::div_constraint(
             rs1_lo,
             rs1_hi,
             rs2_lo,
@@ -3244,9 +3299,17 @@ mod tests {
             quot_hi,
             rem_lo,
             rem_hi,
+            prod_lo_lo,
+            prod_lo_hi,
+            carry_0,
+            carry_1,
+            carry_sum_lo,
+            k_overflow,
         );
 
-        assert_eq!(constraint, M31::ZERO, "DIV basic constraint");
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "DIV basic constraint");
+        }
     }
 
     #[test]
@@ -3262,7 +3325,24 @@ mod tests {
         let (quot_lo, quot_hi) = u32_to_limbs(quotient);
         let (rem_lo, rem_hi) = u32_to_limbs(remainder);
 
-        let constraint = CpuAir::div_constraint(
+        // Calc witnesses
+        let prod_full = (rs2 as u64) * (quotient as u64); // Wrapping mul implies checking low 32 bits match
+        let prod_lo = (prod_full & 0xFFFFFFFF) as u32;
+        let (prod_lo_lo, prod_lo_hi) = u32_to_limbs(prod_lo);
+
+        let t0 = (rs2_lo.as_u32() as u64) * (quot_lo.as_u32() as u64);
+        let carry_0 = M31::new(((t0 >> 16) & 0xFFFF) as u32);
+        let t1 = (rs2_lo.as_u32() as u64) * (quot_hi.as_u32() as u64) +
+                 (rs2_hi.as_u32() as u64) * (quot_lo.as_u32() as u64) +
+                 (carry_0.as_u32() as u64);
+        let carry_1 = M31::new((t1 >> 16) as u32);
+
+        let sum_lo = prod_lo_lo.as_u32() + rem_lo.as_u32();
+        let carry_sum_lo = M31::new(sum_lo >> 16);
+        let sum_hi = prod_lo_hi.as_u32() + rem_hi.as_u32() + carry_sum_lo.as_u32();
+        let k_overflow = M31::new(sum_hi >> 16);
+
+        let constraints = CpuAir::div_constraint(
             rs1_lo,
             rs1_hi,
             rs2_lo,
@@ -3271,11 +3351,17 @@ mod tests {
             quot_hi,
             rem_lo,
             rem_hi,
+            prod_lo_lo,
+            prod_lo_hi,
+            carry_0,
+            carry_1,
+            carry_sum_lo,
+            k_overflow,
         );
 
-        // Placeholder - simplified limb check doesn't handle carries properly
-        // Just verify it compiles
-        let _ = constraint;
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "DIV signed negative failed");
+        }
     }
 
     #[test]
@@ -3417,7 +3503,30 @@ mod tests {
         let (quot_lo, quot_hi) = u32_to_limbs(wrong_quotient);
         let (rem_lo, rem_hi) = u32_to_limbs(remainder);
 
-        let constraint = CpuAir::div_constraint(
+        // Calc witnesses based on WRONG quotient
+        // We want to see if the constraint fails when quotient is wrong.
+        // We provide "correct" witnesses for the multiplication rs2 * wrong_quot,
+        // so that part satisfies its local constraints, but the final reconstruction 
+        // rs1 = prod + rem will fail.
+        let prod_full = (rs2 as u64) * (wrong_quotient as u64);
+        let prod_lo = (prod_full & 0xFFFFFFFF) as u32;
+        let (prod_lo_lo, prod_lo_hi) = u32_to_limbs(prod_lo);
+
+        let t0 = (rs2_lo.as_u32() as u64) * (quot_lo.as_u32() as u64);
+        let carry_0 = M31::new(((t0 >> 16) & 0xFFFF) as u32);
+        let t1 = (rs2_lo.as_u32() as u64) * (quot_hi.as_u32() as u64) +
+                 (rs2_hi.as_u32() as u64) * (quot_lo.as_u32() as u64) +
+                 (carry_0.as_u32() as u64);
+        let carry_1 = M31::new((t1 >> 16) as u32);
+
+        // Witnesses for addition (prod + rem)
+        // We use the computed prod (from wrong quotient) and the actual rem.
+        let sum_lo = prod_lo_lo.as_u32() + rem_lo.as_u32();
+        let carry_sum_lo = M31::new(sum_lo >> 16);
+        let sum_hi = prod_lo_hi.as_u32() + rem_hi.as_u32() + carry_sum_lo.as_u32();
+        let k_overflow = M31::new(sum_hi >> 16);
+
+        let constraints = CpuAir::div_constraint(
             rs1_lo,
             rs1_hi,
             rs2_lo,
@@ -3426,11 +3535,16 @@ mod tests {
             quot_hi,
             rem_lo,
             rem_hi,
+            prod_lo_lo,
+            prod_lo_hi,
+            carry_0,
+            carry_1,
+            carry_sum_lo,
+            k_overflow,
         );
 
-        // Should detect incorrect quotient (when fully implemented)
-        // Placeholder: just verify it compiles
-        assert_ne!(constraint, M31::ZERO, "DIV should catch incorrect quotient");
+        // Should detect incorrect quotient
+        assert!(constraints.iter().any(|&c| c != M31::ZERO), "DIV should catch incorrect quotient");
     }
 
     // ============================================================================
