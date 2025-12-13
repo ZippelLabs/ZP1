@@ -921,12 +921,40 @@ impl CpuAir {
         old_mem_value: M31,
         new_mem_value: M31,
         half_to_store: M31,
-        half_offset: M31,
-    ) -> M31 {
-        // new = (old & ~(0xFFFF << (16*offset))) | ((half & 0xFFFF) << (16*offset))
+        half_offset: M31, // 0 or 1
+        // Witnesses
+        old_mem_halves: &[M31; 2],
+        witness_old_half: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+
+        // 1. Decompose old_mem_value into halfwords
+        let h0 = old_mem_halves[0];
+        let h1 = old_mem_halves[1];
+        let two_16 = M31::new(1 << 16);
         
-        // Placeholder
-        old_mem_value - new_mem_value - half_to_store - half_offset + old_mem_value
+        let reconstruction = h0 + h1 * two_16;
+        constraints.push(old_mem_value - reconstruction);
+
+        // 2. Validate half_offset (must be 0 or 1)
+        constraints.push(half_offset * (half_offset - M31::ONE));
+
+        // 3. Select old halfword
+        // selected_half = h0 + offset * (h1 - h0)
+        let selected_half = h0 + half_offset * (h1 - h0);
+        
+        constraints.push(witness_old_half - selected_half);
+
+        // 4. Verify Memory Update
+        // scale = 1 + offset * (2^16 - 1)
+        // If offset 0: scale = 1. If offset 1: scale = 2^16.
+        let scale = M31::ONE + half_offset * (two_16 - M31::ONE);
+        
+        // new_mem = old_mem + (half_to_store - old_half) * scale
+        let update_check = old_mem_value + (half_to_store - witness_old_half) * scale;
+        constraints.push(new_mem_value - update_check);
+
+        constraints
     }
 
     /// Evaluate SW (Store Word) constraint.
@@ -2637,6 +2665,51 @@ mod tests {
 
         for c in constraints {
             assert_eq!(c, M31::ZERO, "SB constraint failed");
+        }
+    }
+
+    #[test]
+    fn test_store_halfword_full() {
+        // Test SH: mem[addr] = rs2[15:0]
+        // Old Mem: 0x1234F678
+        // Store 0xABCD at offset 1 (replaces 0x1234)
+        // New Mem: 0xABCDF678
+
+        let old_u32 = 0x1234F678u32;
+        let old_val = M31::new(old_u32);
+        
+        let new_u32 = 0xABCDF678u32;
+        let new_val = M31::new(new_u32);
+
+        let half_to_store_val = 0xABCDu32;
+        let half_to_store = M31::new(half_to_store_val);
+        
+        // Offset 1
+        let offset_val = 1;
+        
+        // Witnesses
+        let old_halves_u32 = [
+            old_u32 & 0xFFFF,
+            (old_u32 >> 16) & 0xFFFF,
+        ];
+        let old_mem_halves: [M31; 2] = [
+            M31::new(old_halves_u32[0]),
+            M31::new(old_halves_u32[1]),
+        ];
+        
+        let witness_old_half = old_mem_halves[1]; // 0x1234
+
+        let constraints = CpuAir::store_halfword_constraint(
+            old_val,
+            new_val,
+            half_to_store,
+            M31::new(offset_val),
+            &old_mem_halves,
+            witness_old_half,
+        );
+
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "SH constraint failed");
         }
     }
 
