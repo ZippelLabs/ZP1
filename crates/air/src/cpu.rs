@@ -961,17 +961,22 @@ impl CpuAir {
     /// mem[addr] = rs2
     ///
     /// # Arguments
-    /// * `new_mem_value` - Memory word after store
-    /// * `rs2_val` - Value to store
+    /// * `new_mem_lo`, `new_mem_hi` - Memory word limbs after store
+    /// * `rs2_lo`, `rs2_hi` - Value to store limbs
     ///
     /// # Returns
-    /// Constraint: new_mem_value = rs2_val
+    /// Constraints: new_mem == rs2
     #[inline]
     pub fn store_word_constraint(
-        new_mem_value: M31,
-        rs2_val: M31,
-    ) -> M31 {
-        new_mem_value - rs2_val
+        new_mem_lo: M31,
+        new_mem_hi: M31,
+        rs2_lo: M31,
+        rs2_hi: M31,
+    ) -> Vec<M31> {
+        vec![
+            new_mem_lo - rs2_lo,
+            new_mem_hi - rs2_hi,
+        ]
     }
 
     /// Evaluate alignment constraint for word access.
@@ -2367,16 +2372,22 @@ mod tests {
     #[test]
     fn test_store_word_constraint() {
         // Test SW: mem[addr] = rs2
-        let rs2_val = M31::new(0xABCDEF00);
-        let new_mem = M31::new(0xABCDEF00);
+        let new_mem_val = 0x12345678u32;
+        let rs2_val = 0x12345678u32;
 
-        let constraint = CpuAir::store_word_constraint(new_mem, rs2_val);
-        assert_eq!(constraint, M31::ZERO, "SW constraint failed");
+        let (mem_lo, mem_hi) = u32_to_limbs(new_mem_val);
+        let (rs2_lo, rs2_hi) = u32_to_limbs(rs2_val);
 
-        // Test with wrong stored value
-        let wrong_mem = M31::new(0xABCDEF01);
-        let wrong_constraint = CpuAir::store_word_constraint(wrong_mem, rs2_val);
-        assert_ne!(wrong_constraint, M31::ZERO, "SW should catch incorrect stored value");
+        let constraints = CpuAir::store_word_constraint(mem_lo, mem_hi, rs2_lo, rs2_hi);
+        
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "SW constraint failed for matching values");
+        }
+
+        // Test failure case
+        let bad_mem_lo = mem_lo + M31::ONE;
+        let constraints_bad = CpuAir::store_word_constraint(bad_mem_lo, mem_hi, rs2_lo, rs2_hi);
+         assert!(constraints_bad.iter().any(|&c| c != M31::ZERO), "SW constraint should fail");
     }
 
     #[test]
