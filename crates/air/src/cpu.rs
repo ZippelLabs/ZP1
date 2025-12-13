@@ -1025,18 +1025,33 @@ impl CpuAir {
     /// # Arguments
     /// * `addr_lo` - Lower 16 bits of address
     /// * `is_half_access` - Selector (1 if halfword access, 0 otherwise)
+    /// * `addr_bit_0` - Least significant bit of addr_lo (Witness)
+    /// * `addr_high` - Remaining bits (addr_lo >> 1) (Witness)
     ///
     /// # Returns
-    /// Constraint: is_half_access * (addr_lo % 2) = 0
+    /// Constraints ensuring alignment if is_half_access is true.
     pub fn halfword_alignment_constraint(
         addr_lo: M31,
         is_half_access: M31,
-    ) -> M31 {
-        // addr_lo % 2 = addr_lo & 1
-        // Check low bit is 0
-        
-        // Placeholder
-        is_half_access * (addr_lo - addr_lo)
+        // Witnesses
+        addr_bit_0: M31,
+        addr_high: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+
+        // 1. Verify bit decomposition of addr_lo
+        // addr_lo = b0 + 2*high
+        let reconstruction = addr_bit_0 + addr_high * M31::new(2);
+        constraints.push(addr_lo - reconstruction);
+
+        // 2. Verify bit is binary
+        constraints.push(addr_bit_0 * (addr_bit_0 - M31::ONE));
+
+        // 3. Verify alignment if is_half_access is true
+        // If halfword access, lowest bit must be 0
+        constraints.push(is_half_access * addr_bit_0);
+
+        constraints
     }
 
     // ============================================================================
@@ -2821,12 +2836,42 @@ mod tests {
 
     #[test]
     fn test_halfword_alignment() {
-        // Test halfword alignment (placeholder)
-        let aligned_addr = M31::new(0x1000); // Aligned to 2
+        // Test halfword alignment: addr % 2 == 0
+        // Case 1: Aligned addr = 0x1000 (Binary ...1000000000000) -> Last bit 0
+        let aligned_addr_val = 0x1000u32;
+        let aligned_addr = M31::new(aligned_addr_val);
         let is_half = M31::ONE;
 
-        let constraint = CpuAir::halfword_alignment_constraint(aligned_addr, is_half);
-        assert_eq!(constraint, M31::ZERO, "Halfword alignment constraint failed");
+        // Witnesses
+        let addr_bit_0 = M31::ZERO; // 0
+        let addr_high = M31::new(aligned_addr_val >> 1);
+
+        let constraints = CpuAir::halfword_alignment_constraint(
+            aligned_addr,
+            is_half,
+            addr_bit_0,
+            addr_high,
+        );
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "Halfword alignment (aligned) failed");
+        }
+
+        // Case 2: Misaligned addr = 0x1001 (Binary ...1000000000001) -> Last bit 1
+        let misaligned_addr_val = 0x1001u32;
+        let misaligned_addr = M31::new(misaligned_addr_val);
+        
+        let addr_bit_0_bad = M31::ONE; // 1
+        let addr_high_bad = M31::new(misaligned_addr_val >> 1);
+
+        let constraints_bad = CpuAir::halfword_alignment_constraint(
+            misaligned_addr,
+            is_half,
+            addr_bit_0_bad,
+            addr_high_bad,
+        );
+        
+        // Should fail because is_half * addr_bit_0 = 1 * 1 = 1 != 0
+        assert!(constraints_bad.iter().any(|&c| c != M31::ZERO), "Halfword alignment should fail for 0x1001");
     }
 
     // ============================================================================
