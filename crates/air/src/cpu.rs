@@ -783,14 +783,51 @@ impl CpuAir {
     /// Constraint ensuring correct halfword extraction and zero extension
     pub fn load_halfword_unsigned_constraint(
         mem_value: M31,
-        half_offset: M31,
-        rd_val: M31,
-    ) -> M31 {
-        // half = (mem_value >> (16 * half_offset)) & 0xFFFF
-        // zero_extend = half
+        half_offset: M31, // 0 or 1
+        rd_val_lo: M31,
+        rd_val_hi: M31,
+        // Witnesses
+        mem_halves: &[M31; 2],  // Decomposition of mem_value into 2 halfwords
+        half_bits: &[M31; 16],  // Decomposition of selected halfword for range check
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+
+        // 1. Decompose mem_value into halfwords
+        // mem_value = h0 + h1 * 2^16
+        let h0 = mem_halves[0];
+        let h1 = mem_halves[1];
+        let two_16 = M31::new(1 << 16);
         
-        // Placeholder
-        mem_value - rd_val - half_offset + mem_value
+        let reconstruction = h0 + h1 * two_16;
+        constraints.push(mem_value - reconstruction);
+
+        // 2. Decompose half_offset (must be 0 or 1)
+        constraints.push(half_offset * (half_offset - M31::ONE));
+
+        // 3. Select halfword
+        // selected_half = (1 - half_offset) * h0 + half_offset * h1
+        //               = h0 + half_offset * (h1 - h0)
+        let selected_half = h0 + half_offset * (h1 - h0);
+
+        // 4. Verify bits of selected halfword for range check
+        let mut half_val = M31::ZERO;
+        let mut power = M31::ONE;
+        for &bit in half_bits {
+             constraints.push(bit * (bit - M31::ONE)); // Binary check
+             half_val = half_val + bit * power;
+             power = power + power;
+        }
+        
+        // Ensure reconstructed half matches selected half
+        constraints.push(selected_half - half_val);
+
+        // 5. Zero extension
+        // rd_val_lo = selected_half
+        // rd_val_hi = 0
+        constraints.push(rd_val_lo - selected_half);
+        constraints.push(rd_val_hi); // Must be zero
+
+        constraints
     }
 
     /// Evaluate SB (Store Byte) constraint.
@@ -2505,6 +2542,52 @@ mod tests {
             
             for c in constraints {
                 assert_eq!(c, M31::ZERO, "LBU byte 1 (zero ext) failed");
+            }
+        }
+    }
+
+    #[test]
+    fn test_load_halfword_unsigned_full() {
+        // Test LHU: rd = zero_extend(mem[addr][15:0])
+        // mem_value = 0x1234F678.
+        // offset 0 -> 0xF678 -> 0x0000F678 (Zero extended, NOT signed 0xFFFFF678)
+
+        let mem_u32 = 0x1234F678u32;
+        let mem_value = M31::new(mem_u32);
+        
+        let mem_halves_u32 = [
+            mem_u32 & 0xFFFF,
+            (mem_u32 >> 16) & 0xFFFF,
+        ];
+        let mem_halves: [M31; 2] = [
+            M31::new(mem_halves_u32[0]),
+            M31::new(mem_halves_u32[1]),
+        ];
+
+        // Case 1: Load half 0 (0xF678) - Negative if signed, but here Unsigned
+        {
+            let offset_val = 0;
+            let half_val = mem_halves_u32[offset_val as usize]; // 0xF678
+            // Zero extension: 0x0000F678
+            let rd_u32 = half_val; 
+            let (rd_lo, rd_hi) = u32_to_limbs(rd_u32);
+            
+            let half_bits_val = half_val;
+            let mut half_bits = [M31::ZERO; 16];
+            for i in 0..16 {
+                half_bits[i] = M31::new((half_bits_val >> i) & 1);
+            }
+
+            let constraints = CpuAir::load_halfword_unsigned_constraint(
+                mem_value,
+                M31::new(offset_val),
+                rd_lo, rd_hi,
+                &mem_halves,
+                &half_bits,
+            );
+            
+            for c in constraints {
+                assert_eq!(c, M31::ZERO, "LHU half 0 (zero ext) failed");
             }
         }
     }
