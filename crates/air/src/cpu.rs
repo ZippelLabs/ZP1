@@ -1551,34 +1551,58 @@ impl CpuAir {
     }
 
     /// Evaluate BNE constraint: branch if rs1 != rs2.
+    ///
+    /// # Arguments
+    /// * `rs1_lo/hi` - First operand limbs
+    /// * `rs2_lo/hi` - Second operand limbs
+    /// * `branch_taken` - Branch taken flag (witness)
+    /// * `pc` - Current PC
+    /// * `next_pc` - Next PC value
+    /// * `offset` - Branch offset (sign-extended immediate)
+    /// * `is_equal_lo` - 1 if rs1_lo == rs2_lo (witness)
+    /// * `inv_diff_lo` - Inverse of (rs1_lo - rs2_lo) or 0 (witness)
+    /// * `is_equal_hi` - 1 if rs1_hi == rs2_hi (witness)
+    /// * `inv_diff_hi` - Inverse of (rs1_hi - rs2_hi) or 0 (witness)
+    ///
+    /// # Returns
+    /// Constraints ensuring correct inequality checks and PC update
     pub fn bne_constraint(
         rs1_lo: M31,
         rs1_hi: M31,
         rs2_lo: M31,
         rs2_hi: M31,
-        ne_result: M31,
         branch_taken: M31,
         pc: M31,
         next_pc: M31,
         offset: M31,
-    ) -> M31 {
-        // branch_taken = 1 iff rs1 != rs2
-        // ne_result = 1 - eq_result
-        
+        // Equality witnesses
+        is_equal_lo: M31,
+        inv_diff_lo: M31,
+        is_equal_hi: M31,
+        inv_diff_hi: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+
+        // 1. IsZero gadget for Low Limb Difference
         let diff_lo = rs1_lo - rs2_lo;
+        constraints.push(diff_lo * is_equal_lo);
+        constraints.push(diff_lo * inv_diff_lo - (M31::ONE - is_equal_lo));
+
+        // 2. IsZero gadget for High Limb Difference
         let diff_hi = rs1_hi - rs2_hi;
-        
-        // If ne_result=1, at least one diff must be non-zero
-        // If ne_result=0, both diffs must be zero
-        let c1 = (M31::ONE - ne_result) * (diff_lo + diff_hi);
-        let c2 = ne_result * (M31::ONE - ne_result); // Binary
-        let c3 = branch_taken - ne_result;
-        
+        constraints.push(diff_hi * is_equal_hi);
+        constraints.push(diff_hi * inv_diff_hi - (M31::ONE - is_equal_hi));
+
+        // 3. Branch condition: taken iff NOT equal
+        let is_full_equal = is_equal_lo * is_equal_hi;
+        constraints.push(branch_taken - (M31::ONE - is_full_equal));
+
+        // 4. PC Update
         let four = M31::new(4);
         let expected_pc = branch_taken * (pc + offset) + (M31::ONE - branch_taken) * (pc + four);
-        let c4 = next_pc - expected_pc;
-        
-        c1 + c2 + c3 + c4
+        constraints.push(next_pc - expected_pc);
+
+        constraints
     }
 
     /// Evaluate BLT constraint: branch if rs1 < rs2 (signed).
@@ -3790,18 +3814,60 @@ mod tests {
         let (rs1_lo, rs1_hi) = u32_to_limbs(rs1);
         let (rs2_lo, rs2_hi) = u32_to_limbs(rs2);
         
-        let ne_result = M31::ONE; // Not equal
         let branch_taken = M31::ONE;
         let pc = M31::new(0x2000);
         let offset = M31::new(0x50);
         let next_pc = M31::new(0x2050); // pc + offset
+
+        // Witnesses
+        // Low: 0xABCD vs 0x1234 -> diff != 0
+        let diff_lo = rs1_lo - rs2_lo;
+        let is_equal_lo = M31::ZERO;
+        let inv_diff_lo = diff_lo.inv();
+
+        // High: 0 (u32/16b) vs 0 -> equal
+        let is_equal_hi = M31::ONE;
+        let inv_diff_hi = M31::ZERO;
         
-        let constraint = CpuAir::bne_constraint(
+        let constraints = CpuAir::bne_constraint(
             rs1_lo, rs1_hi, rs2_lo, rs2_hi,
-            ne_result, branch_taken, pc, next_pc, offset,
+            branch_taken, pc, next_pc, offset,
+            is_equal_lo, inv_diff_lo, is_equal_hi, inv_diff_hi,
         );
         
-        assert_eq!(constraint, M31::ZERO, "BNE taken constraint failed");
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "BNE taken constraint failed");
+        }
+    }
+
+    #[test]
+    fn test_bne_not_taken() {
+        // Test BNE when rs1 == rs2 (branch NOT taken)
+        let rs1 = 0x12345678u32;
+        let rs2 = 0x12345678u32;
+        let (rs1_lo, rs1_hi) = u32_to_limbs(rs1);
+        let (rs2_lo, rs2_hi) = u32_to_limbs(rs2);
+
+        let branch_taken = M31::ZERO;
+        let pc = M31::new(0x2000);
+        let offset = M31::new(0x50);
+        let next_pc = M31::new(0x2004); // pc + 4
+
+        // Witnesses (Equal)
+        let is_equal_lo = M31::ONE;
+        let inv_diff_lo = M31::ZERO;
+        let is_equal_hi = M31::ONE;
+        let inv_diff_hi = M31::ZERO;
+
+        let constraints = CpuAir::bne_constraint(
+            rs1_lo, rs1_hi, rs2_lo, rs2_hi,
+            branch_taken, pc, next_pc, offset,
+            is_equal_lo, inv_diff_lo, is_equal_hi, inv_diff_hi,
+        );
+        
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "BNE not taken constraint failed");
+        }
     }
 
     #[test]
