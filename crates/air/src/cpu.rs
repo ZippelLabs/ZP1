@@ -1874,30 +1874,41 @@ impl CpuAir {
     }
 
     /// Evaluate JAL constraint: unconditional jump with link.
+
+    /// # Returns
+    /// Constraints ensuring correct JAL behavior
+    /// Evaluate JAL constraint: unconditional jump with link.
     /// rd = pc + 4, next_pc = pc + offset
     ///
     /// # Arguments
     /// * `pc` - Current PC
     /// * `next_pc` - Next PC (should be pc + offset)
-    /// * `rd_val` - Destination register value (should be pc + 4)
+    /// * `rd_val_lo/hi` - Destination register value limbs (should represent pc + 4)
     /// * `offset` - Jump offset (sign-extended immediate)
-    ///
-    /// # Returns
-    /// Constraints ensuring correct JAL behavior
+
     pub fn jal_constraint(
         pc: M31,
         next_pc: M31,
-        rd_val: M31,
+        rd_val_lo: M31,
+        rd_val_hi: M31,
         offset: M31,
-    ) -> M31 {
-        // Constraint 1: rd = pc + 4
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+        let base_limbs = M31::new(65536);
         let four = M31::new(4);
-        let c1 = rd_val - (pc + four);
+
+        // Constraint 1: rd = pc + 4
+        // rd_val = rd_val_lo + rd_val_hi * 2^16
+        // pc + 4 MUST equal rd_val.
+        // Since PC is in field and small, we expect rd to handle this without overflow logic if we trust PC is small.
+        // Standard PC range implies pc+4 fits in 32 bits easily.
+        let rd_val = rd_val_lo + rd_val_hi * base_limbs;
+        constraints.push(rd_val - (pc + four));
         
         // Constraint 2: next_pc = pc + offset
-        let c2 = next_pc - (pc + offset);
+        constraints.push(next_pc - (pc + offset));
         
-        c1 + c2
+        constraints
     }
 
     /// Evaluate JALR constraint: indirect jump with link.
@@ -4220,16 +4231,22 @@ mod tests {
     }
 
     #[test]
-    fn test_jal() {
-        // Test JAL: rd = pc + 4, next_pc = pc + offset
-        let pc = M31::new(0x1000);
-        let offset = M31::new(0x200);
-        let next_pc = M31::new(0x1200); // pc + offset
-        let rd_val = M31::new(0x1004); // pc + 4
+    fn test_jal_basic() {
+        // Test JAL (Unconditional Jump)
+        let pc = M31::new(0x8000);
+        let offset = M31::new(0x200); // Jump to 0x8200
+        let next_pc = M31::new(0x8200);
         
-        let constraint = CpuAir::jal_constraint(pc, next_pc, rd_val, offset);
+        let rd_val_expected = 0x8004u32;
+        let (rd_lo, rd_hi) = u32_to_limbs(rd_val_expected);
+
+        let constraints = CpuAir::jal_constraint(
+            pc, next_pc, rd_lo, rd_hi, offset
+        );
         
-        assert_eq!(constraint, M31::ZERO, "JAL constraint failed");
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "JAL constraint failed");
+        }
     }
 
     #[test]
@@ -4238,11 +4255,13 @@ mod tests {
         let pc = M31::new(0x1000);
         let offset = M31::new(0x200);
         let next_pc = M31::new(0x1200);
-        let wrong_rd = M31::new(0x1008); // Wrong link value
+        let wrong_rd = 0x1008u32; // Wrong link value
+        let (rd_lo, rd_hi) = u32_to_limbs(wrong_rd);
         
-        let constraint = CpuAir::jal_constraint(pc, next_pc, wrong_rd, offset);
+        let constraints = CpuAir::jal_constraint(pc, next_pc, rd_lo, rd_hi, offset);
         
-        assert_ne!(constraint, M31::ZERO, "JAL should catch incorrect link");
+        // Should fail
+        assert!(constraints.iter().any(|&c| c != M31::ZERO), "JAL should catch incorrect link");
     }
 
     #[test]
@@ -4289,22 +4308,21 @@ mod tests {
 
         // Witnesses claiming equality
         let is_equal_lo = M31::ONE; // Lie: say eq
-        let inv_diff_lo = M31::ZERO; // Irrelevant for this test, but IsZero Check 1 is diff*is_equal=0
+        // ... (rest of simple test logic omitted for brevity in append)
         
+        let inv_diff_lo = M31::ZERO;
         let is_equal_hi = M31::ONE;
         let inv_diff_hi = M31::ZERO;
 
-        // If rs1 != rs2, then diff != 0.
-        // Constraint: diff * is_equal == 0.
-        // If we set is_equal=1, then diff * 1 != 0. Constraint fails.
-        
-        // Note: we need to handle full args
         let constraints = CpuAir::beq_constraint(
             rs1_lo, rs1_hi, rs2_lo, rs2_hi,
             branch_taken, pc, next_pc, offset,
             is_equal_lo, inv_diff_lo, is_equal_hi, inv_diff_hi,
         );
-        
-        assert!(constraints.iter().any(|&c| c != M31::ZERO), "Should detect incorrect is_equal witness");
+
+        // One of the constraints should fail (likely diff * is_equal != 0)
+        assert!(constraints.iter().any(|&c| c != M31::ZERO), "Soundness check failed for BEQ");
     }
+
+
 }
