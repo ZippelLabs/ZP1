@@ -1912,35 +1912,51 @@ impl CpuAir {
     }
 
     /// Evaluate JALR constraint: indirect jump with link.
+
+    /// # Returns
+    /// Constraints ensuring correct JALR behavior
+    /// Evaluate JALR constraint: indirect jump with link.
     /// rd = pc + 4, next_pc = (rs1 + offset) & ~1
     ///
     /// # Arguments
     /// * `pc` - Current PC
-    /// * `rs1_val` - Base register value
+    /// * `rs1_lo/hi` - Base register value limbs
     /// * `next_pc` - Next PC (should be (rs1 + offset) & ~1)
-    /// * `rd_val` - Destination register value (should be pc + 4)
+    /// * `rd_val_lo/hi` - Destination register value limbs (should represent pc + 4)
     /// * `offset` - Jump offset (sign-extended immediate)
+    /// * `next_pc_div2` - Witness for next_pc / 2 (ensures next_pc is even)
     ///
-    /// # Returns
-    /// Constraints ensuring correct JALR behavior
+
     pub fn jalr_constraint(
         pc: M31,
-        rs1_val: M31,
+        rs1_lo: M31, rs1_hi: M31,
         next_pc: M31,
-        rd_val: M31,
+        rd_val_lo: M31, rd_val_hi: M31,
         offset: M31,
-    ) -> M31 {
-        // Constraint 1: rd = pc + 4
+        next_pc_div2: M31,
+    ) -> Vec<M31> {
+        let mut constraints = Vec::new();
+        let base_limbs = M31::new(65536);
         let four = M31::new(4);
-        let c1 = rd_val - (pc + four);
+
+        // Constraint 1: rd = pc + 4
+        let rd_val = rd_val_lo + rd_val_hi * base_limbs;
+        constraints.push(rd_val - (pc + four));
         
         // Constraint 2: next_pc = (rs1 + offset) & ~1
-        // The LSB masking ensures PC is always aligned
-        // Simplified helper: assume next_pc = rs1 + offset (alignment checked in rv32im.rs)
-        let c2 = next_pc - (rs1_val + offset);
+        // Step 2a: Enforce next_pc is even.
+        // next_pc = 2 * next_pc_div2
+        constraints.push(next_pc - M31::new(2) * next_pc_div2);
+
+        // Step 2b: Enforce (rs1 + offset) - next_pc \in {0, 1}
+        // This ensures next_pc corresponds to target with LSB cleared.
+        let rs1_val = rs1_lo + rs1_hi * base_limbs;
+        let target = rs1_val + offset;
+        let diff = target - next_pc;
+        // diff * (diff - 1) = 0
+        constraints.push(diff * (diff - M31::ONE));
         
-        // Placeholder helper for tests; production constraints implemented in rv32im.rs
-        c1 + c2
+        constraints
     }
 }
 
@@ -4266,30 +4282,52 @@ mod tests {
 
     #[test]
     fn test_jalr() {
-        // Test JALR: rd = pc + 4, next_pc = rs1 + offset
+        // Test JALR: rd = pc + 4, next_pc = (rs1 + offset) & ~1
         let pc = M31::new(0x2000);
-        let rs1_val = M31::new(0x5000);
+        let rs1_val = 0x5001u32; // rs1 is odd
+        let (rs1_lo, rs1_hi) = u32_to_limbs(rs1_val);
+        
         let offset = M31::new(0x100);
-        let next_pc = M31::new(0x5100); // rs1 + offset
-        let rd_val = M31::new(0x2004); // pc + 4
+        // Target = 0x5001 + 0x100 = 0x5101.
+        // next_pc = 0x5101 & ~1 = 0x5100.
+        let next_pc = M31::new(0x5100); 
         
-        let constraint = CpuAir::jalr_constraint(pc, rs1_val, next_pc, rd_val, offset);
+        let rd_val_expected = 0x2004u32; // pc + 4
+        let (rd_lo, rd_hi) = u32_to_limbs(rd_val_expected);
         
-        assert_eq!(constraint, M31::ZERO, "JALR constraint failed");
+        // witness: next_pc / 2 = 0x2880
+        let next_pc_div2 = M31::new(0x2880);
+
+        let constraints = CpuAir::jalr_constraint(
+            pc, rs1_lo, rs1_hi, next_pc, rd_lo, rd_hi, offset, next_pc_div2
+        );
+        
+        for c in constraints {
+            assert_eq!(c, M31::ZERO, "JALR constraint failed");
+        }
     }
 
     #[test]
     fn test_jalr_wrong_target() {
         // Test JALR with incorrect jump target
         let pc = M31::new(0x2000);
-        let rs1_val = M31::new(0x5000);
+        let rs1_val = 0x5000u32;
+        let (rs1_lo, rs1_hi) = u32_to_limbs(rs1_val);
+        
         let offset = M31::new(0x100);
-        let wrong_next_pc = M31::new(0x5200); // Incorrect target
-        let rd_val = M31::new(0x2004);
+        // Correct target = 0x5100.
+        // Wrong target = 0x5200.
+        let wrong_next_pc = M31::new(0x5200); 
+        let next_pc_div2 = M31::new(0x2900); // 0x5200 / 2
+
+        let rd_val_expected = 0x2004u32;
+        let (rd_lo, rd_hi) = u32_to_limbs(rd_val_expected);
         
-        let constraint = CpuAir::jalr_constraint(pc, rs1_val, wrong_next_pc, rd_val, offset);
+        let constraints = CpuAir::jalr_constraint(
+            pc, rs1_lo, rs1_hi, wrong_next_pc, rd_lo, rd_hi, offset, next_pc_div2
+        );
         
-        assert_ne!(constraint, M31::ZERO, "JALR should catch incorrect target");
+        assert!(constraints.iter().any(|&c| c != M31::ZERO), "JALR should catch incorrect target");
     }
 
     #[test]
