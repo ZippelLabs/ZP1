@@ -68,8 +68,8 @@ Each 32-bit register value is split into 16-bit limbs for efficient range checki
 | `rs2_val_hi` | Source 2 value high | 16-31 |
 
 **Why 16-bit limbs?**
-- Enables efficient range checks (16-bit < 2^31-1 native M31 range)
-- Degree-2 reconstruction: `value = lo + (hi << 16)`
+- Enables efficient range checks: 16-bit values (0-65535) are well within M31 field range (0 to 2³¹-2), making range validation trivial
+- Degree-2 reconstruction: `value = lo + (hi << 16)` 
 - Carry/overflow detection stays in degree-2
 
 ### Instruction Selectors (45 columns)
@@ -159,7 +159,7 @@ All constraints are polynomial equations over M31 that must equal **zero** for v
 
 #### 1. x0_zero (degree 1)
 ```
-constraint: rd_val == 0 when rd == 0
+constraint: rd_val = 0 when rd = 0
 ```
 Enforces RISC-V invariant that register `x0` always reads as zero.
 
@@ -189,9 +189,10 @@ equation: rd_val_lo + (rd_val_hi << 16) ==
 
 #### 5-7. and, or, xor (degree 2)
 ```
-constraint: rd_val == rs1_val OP rs2_val
+constraint: rd_val = rs1_val OP rs2_val
 optimization: Uses lookup tables (LogUp) to avoid 32 bit-level constraints
-equation: Lookup(rs1_val, rs2_val, rd_val, OP) == valid
+equation: Lookup(rs1_val, rs2_val, rd_val, OP) valid
+Note: Lookup() is conceptual - actual implementation uses LogUp rational function sums
 ```
 
 #### 8-10. sll, srl, sra (degree 2)
@@ -397,10 +398,10 @@ Compare to degree-4 system:
 
 **Security Level**: 128-bit computational soundness
 
-1. **Base Field**: M31 provides 31-bit security per constraint
-2. **Extension Field**: QM31 (quartic extension) provides 124-bit security
-3. **DEEP Sampling**: Out-of-domain evaluation adds additional soundness
-4. **FRI Protocol**: Low-degree testing with cryptographic commitments
+1. **Base Field**: M31 (2³¹-1) provides foundational arithmetic
+2. **Extension Field**: QM31 (quartic extension) provides ~124-bit representation, achieving 128-bit security against polynomial forgery
+3. **DEEP Sampling**: Out-of-domain evaluation adds additional soundness layers
+4. **FRI Protocol**: Low-degree testing with cryptographic commitments ensures constraint satisfaction
 
 **Key Insight**: Degree-2 constraints do NOT reduce security when using proper field extensions. The soundness comes from the algebraic structure, not the polynomial degree.
 
@@ -432,10 +433,15 @@ All 39 constraints are **independent** and can be evaluated in parallel:
 
 ## References
 
-- **Code Implementation**: `crates/air/src/rv32im.rs`
-- **Column Definitions**: `crates/trace/src/columns.rs`
-- **Prover Integration**: `crates/prover/src/stark.rs`
+### Implementation
+- **Constraint Functions**: `crates/air/src/rv32im.rs` - `ConstraintEvaluator` struct with all 39 constraint evaluation methods
+- **Column Definitions**: `crates/trace/src/columns.rs` - `TraceColumns` struct with 77 field definitions
+- **AIR Metadata**: `crates/air/src/rv32im.rs` - `Rv32imAir::new()` for constraint list and degrees
+- **Prover Integration**: `crates/prover/src/stark.rs` - STARK prover implementation with LDE and FRI
+
+### Specifications
 - **RISC-V ISA Spec**: https://riscv.org/specifications/
+- **Circle STARK Paper**: Leverages circle group FFTs over Mersenne-31
 
 ## FAQ
 
