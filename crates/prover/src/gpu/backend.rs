@@ -2,8 +2,8 @@
 
 #![allow(dead_code)]
 
-use std::sync::Arc;
 use crate::gpu::DeviceType;
+use std::sync::Arc;
 
 /// Error type for GPU operations.
 #[derive(Debug, Clone)]
@@ -26,12 +26,23 @@ impl std::fmt::Display for GpuError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             GpuError::DeviceNotAvailable(msg) => write!(f, "Device not available: {}", msg),
-            GpuError::OutOfMemory { requested, available } => {
-                write!(f, "Out of GPU memory: requested {} bytes, {} available", requested, available)
+            GpuError::OutOfMemory {
+                requested,
+                available,
+            } => {
+                write!(
+                    f,
+                    "Out of GPU memory: requested {} bytes, {} available",
+                    requested, available
+                )
             }
             GpuError::KernelError(msg) => write!(f, "Kernel execution failed: {}", msg),
             GpuError::InvalidBufferSize { expected, actual } => {
-                write!(f, "Invalid buffer size: expected {}, got {}", expected, actual)
+                write!(
+                    f,
+                    "Invalid buffer size: expected {}, got {}",
+                    expected, actual
+                )
             }
             GpuError::SyncError(msg) => write!(f, "Synchronization error: {}", msg),
             GpuError::NotSupported(msg) => write!(f, "Feature not supported: {}", msg),
@@ -45,16 +56,16 @@ impl std::error::Error for GpuError {}
 pub trait GpuMemory: Send + Sync {
     /// Get the size of the allocated memory in bytes.
     fn size(&self) -> usize;
-    
+
     /// Copy data from host to device.
     fn copy_from_host(&mut self, data: &[u8]) -> Result<(), GpuError>;
-    
+
     /// Copy data from device to host.
     fn copy_to_host(&self, data: &mut [u8]) -> Result<(), GpuError>;
-    
+
     /// Get raw pointer (for internal use).
     fn as_ptr(&self) -> *const u8;
-    
+
     /// Get mutable raw pointer (for internal use).
     fn as_mut_ptr(&mut self) -> *mut u8;
 }
@@ -63,16 +74,16 @@ pub trait GpuMemory: Send + Sync {
 pub trait GpuDevice: Send + Sync {
     /// Get device type.
     fn device_type(&self) -> DeviceType;
-    
+
     /// Get device name.
     fn name(&self) -> &str;
-    
+
     /// Allocate memory on device.
     fn allocate(&self, size: usize) -> Result<Box<dyn GpuMemory>, GpuError>;
-    
+
     /// Synchronize all pending operations.
     fn synchronize(&self) -> Result<(), GpuError>;
-    
+
     /// Get available memory in bytes.
     fn available_memory(&self) -> usize;
 }
@@ -81,13 +92,13 @@ pub trait GpuDevice: Send + Sync {
 pub trait GpuBackend: Send + Sync {
     /// Get the underlying device.
     fn device(&self) -> &dyn GpuDevice;
-    
+
     /// Perform Number Theoretic Transform (NTT) on M31 elements.
     fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError>;
-    
+
     /// Perform inverse NTT on M31 elements.
     fn intt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError>;
-    
+
     /// Batch polynomial evaluation at multiple points.
     fn batch_evaluate(
         &self,
@@ -95,10 +106,10 @@ pub trait GpuBackend: Send + Sync {
         points: &[u32],
         results: &mut [u32],
     ) -> Result<(), GpuError>;
-    
+
     /// Compute Merkle tree from leaf hashes.
     fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError>;
-    
+
     /// Low Degree Extension (LDE) of polynomial.
     fn lde(&self, coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError>;
 }
@@ -120,7 +131,7 @@ impl GpuMemory for CpuMemory {
     fn size(&self) -> usize {
         self.data.len()
     }
-    
+
     fn copy_from_host(&mut self, data: &[u8]) -> Result<(), GpuError> {
         if data.len() != self.data.len() {
             return Err(GpuError::InvalidBufferSize {
@@ -131,7 +142,7 @@ impl GpuMemory for CpuMemory {
         self.data.copy_from_slice(data);
         Ok(())
     }
-    
+
     fn copy_to_host(&self, data: &mut [u8]) -> Result<(), GpuError> {
         if data.len() != self.data.len() {
             return Err(GpuError::InvalidBufferSize {
@@ -142,11 +153,11 @@ impl GpuMemory for CpuMemory {
         data.copy_from_slice(&self.data);
         Ok(())
     }
-    
+
     fn as_ptr(&self) -> *const u8 {
         self.data.as_ptr()
     }
-    
+
     fn as_mut_ptr(&mut self) -> *mut u8 {
         self.data.as_mut_ptr()
     }
@@ -175,20 +186,20 @@ impl GpuDevice for CpuDevice {
     fn device_type(&self) -> DeviceType {
         DeviceType::Cpu
     }
-    
+
     fn name(&self) -> &str {
         &self.name
     }
-    
+
     fn allocate(&self, size: usize) -> Result<Box<dyn GpuMemory>, GpuError> {
         Ok(Box::new(CpuMemory::new(size)))
     }
-    
+
     fn synchronize(&self) -> Result<(), GpuError> {
         // CPU operations are synchronous
         Ok(())
     }
-    
+
     fn available_memory(&self) -> usize {
         // Return a large value for CPU
         usize::MAX
@@ -218,7 +229,7 @@ impl GpuBackend for CpuBackend {
     fn device(&self) -> &dyn GpuDevice {
         self.device.as_ref()
     }
-    
+
     fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
         let n = 1usize << log_n;
         if values.len() != n {
@@ -260,7 +271,7 @@ impl GpuBackend for CpuBackend {
 
         Ok(())
     }
-    
+
     fn intt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
         let n = 1usize << log_n;
         if values.len() != n {
@@ -308,7 +319,7 @@ impl GpuBackend for CpuBackend {
 
         Ok(())
     }
-    
+
     fn batch_evaluate(
         &self,
         coeffs: &[u32],
@@ -321,26 +332,26 @@ impl GpuBackend for CpuBackend {
                 actual: results.len(),
             });
         }
-        
+
         use zp1_primitives::field::M31;
-        
+
         // Evaluate polynomial at each point
         for (i, &point) in points.iter().enumerate() {
             let x = M31::new(point);
             let mut result = M31::ZERO;
             let mut x_pow = M31::ONE;
-            
+
             for &coeff in coeffs {
                 result = result + M31::new(coeff) * x_pow;
                 x_pow = x_pow * x;
             }
-            
+
             results[i] = result.value();
         }
-        
+
         Ok(())
     }
-    
+
     fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
         let n = leaves.len();
         if n == 0 || !n.is_power_of_two() {
@@ -370,7 +381,7 @@ impl GpuBackend for CpuBackend {
 
         Ok(tree)
     }
-    
+
     fn lde(&self, coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
         let n = coeffs.len();
         let extended_n = n * blowup_factor;
@@ -406,12 +417,20 @@ const M31_P: u32 = (1u32 << 31) - 1;
 #[inline]
 fn m31_add(a: u32, b: u32) -> u32 {
     let sum = a.wrapping_add(b);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
 fn m31_sub(a: u32, b: u32) -> u32 {
-    if a >= b { a - b } else { M31_P - b + a }
+    if a >= b {
+        a - b
+    } else {
+        M31_P - b + a
+    }
 }
 
 #[inline]
@@ -420,7 +439,11 @@ fn m31_mul(a: u32, b: u32) -> u32 {
     let lo = (prod & (M31_P as u64)) as u32;
     let hi = (prod >> 31) as u32;
     let sum = lo.wrapping_add(hi);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
@@ -433,13 +456,13 @@ fn mod_inverse(a: u32, m: u32) -> u32 {
     let mut r = a as i64;
     let mut old_s = 0i64;
     let mut s = 1i64;
-    
+
     while r != 0 {
         let q = old_r / r;
         (old_r, r) = (r, old_r - q * r);
         (old_s, s) = (s, old_s - q * s);
     }
-    
+
     if old_s < 0 {
         (old_s + m as i64) as u32
     } else {
@@ -450,44 +473,46 @@ fn mod_inverse(a: u32, m: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_cpu_memory() {
         let mut mem = CpuMemory::new(32);
         assert_eq!(mem.size(), 32);
-        
+
         let data = vec![1u8; 32];
         mem.copy_from_host(&data).unwrap();
-        
+
         let mut output = vec![0u8; 32];
         mem.copy_to_host(&mut output).unwrap();
-        
+
         assert_eq!(data, output);
     }
-    
+
     #[test]
     fn test_cpu_device() {
         let device = CpuDevice::new();
         assert_eq!(device.device_type(), DeviceType::Cpu);
         assert!(device.name().contains("CPU"));
-        
+
         let mem = device.allocate(64).unwrap();
         assert_eq!(mem.size(), 64);
-        
+
         device.synchronize().unwrap();
     }
-    
+
     #[test]
     fn test_cpu_backend_batch_evaluate() {
         let backend = CpuBackend::new();
-        
+
         // Polynomial: 1 + 2x + 3x^2
         let coeffs = vec![1, 2, 3];
         let points = vec![0, 1, 2];
         let mut results = vec![0u32; 3];
-        
-        backend.batch_evaluate(&coeffs, &points, &mut results).unwrap();
-        
+
+        backend
+            .batch_evaluate(&coeffs, &points, &mut results)
+            .unwrap();
+
         // At x=0: 1 + 0 + 0 = 1
         assert_eq!(results[0], 1);
         // At x=1: 1 + 2 + 3 = 6
@@ -495,10 +520,13 @@ mod tests {
         // At x=2: 1 + 4 + 12 = 17
         assert_eq!(results[2], 17);
     }
-    
+
     #[test]
     fn test_gpu_error_display() {
-        let err = GpuError::OutOfMemory { requested: 1000, available: 500 };
+        let err = GpuError::OutOfMemory {
+            requested: 1000,
+            available: 500,
+        };
         let msg = format!("{}", err);
         assert!(msg.contains("1000"));
         assert!(msg.contains("500"));

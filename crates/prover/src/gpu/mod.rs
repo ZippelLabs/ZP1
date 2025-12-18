@@ -33,13 +33,15 @@ pub mod metal;
 
 pub mod cuda;
 
-pub use backend::{GpuBackend, GpuDevice, GpuError, GpuMemory, CpuBackend};
-pub use operations::{GpuNtt, GpuPolynomial, GpuMerkle};
+pub use backend::{CpuBackend, GpuBackend, GpuDevice, GpuError, GpuMemory};
+pub use operations::{GpuMerkle, GpuNtt, GpuPolynomial};
 
 #[cfg(target_os = "macos")]
 pub use metal::{MetalBackend, MetalDevice, MetalMemory, METAL_M31_SHADERS};
 
-pub use cuda::{CudaBackend, CudaDevice, CudaMemory, CudaDeviceInfo, CUDA_M31_KERNELS, query_cuda_devices};
+pub use cuda::{
+    query_cuda_devices, CudaBackend, CudaDevice, CudaDeviceInfo, CudaMemory, CUDA_M31_KERNELS,
+};
 
 /// GPU device type enumeration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,7 +67,7 @@ impl std::fmt::Display for DeviceType {
 /// Detect available GPU devices on the system.
 pub fn detect_devices() -> Vec<DeviceInfo> {
     let mut devices = Vec::new();
-    
+
     // Check for Metal (macOS)
     #[cfg(target_os = "macos")]
     {
@@ -77,7 +79,7 @@ pub fn detect_devices() -> Vec<DeviceInfo> {
             available: true,
         });
     }
-    
+
     // CPU fallback is always available
     devices.push(DeviceInfo {
         device_type: DeviceType::Cpu,
@@ -86,7 +88,7 @@ pub fn detect_devices() -> Vec<DeviceInfo> {
         memory_bytes: 0,
         available: true,
     });
-    
+
     devices
 }
 
@@ -112,9 +114,9 @@ fn num_cpus() -> usize {
 }
 
 /// Get the best available GPU backend.
-/// 
+///
 /// Priority: Metal (macOS) > CUDA > CPU
-/// 
+///
 /// # Returns
 /// A boxed GpuBackend implementation.
 pub fn get_backend() -> Result<Box<dyn GpuBackend>, GpuError> {
@@ -126,7 +128,7 @@ pub fn get_backend() -> Result<Box<dyn GpuBackend>, GpuError> {
             Err(_) => {} // Fall through to next option
         }
     }
-    
+
     // Try CUDA (would fail without cuda feature)
     #[cfg(feature = "cuda")]
     {
@@ -135,7 +137,7 @@ pub fn get_backend() -> Result<Box<dyn GpuBackend>, GpuError> {
             Err(_) => {} // Fall through to CPU
         }
     }
-    
+
     // CPU fallback
     Ok(Box::new(CpuBackend::default()))
 }
@@ -145,12 +147,12 @@ pub fn get_backend_for_device(device_type: DeviceType) -> Result<Box<dyn GpuBack
     match device_type {
         #[cfg(target_os = "macos")]
         DeviceType::Metal => Ok(Box::new(MetalBackend::new()?)),
-        
+
         #[cfg(not(target_os = "macos"))]
         DeviceType::Metal => Err(GpuError::DeviceNotAvailable(
-            "Metal is only available on macOS".to_string()
+            "Metal is only available on macOS".to_string(),
         )),
-        
+
         DeviceType::Cuda => {
             #[cfg(feature = "cuda")]
             {
@@ -159,11 +161,11 @@ pub fn get_backend_for_device(device_type: DeviceType) -> Result<Box<dyn GpuBack
             #[cfg(not(feature = "cuda"))]
             {
                 Err(GpuError::DeviceNotAvailable(
-                    "CUDA support not compiled. Enable 'cuda' feature.".to_string()
+                    "CUDA support not compiled. Enable 'cuda' feature.".to_string(),
                 ))
             }
         }
-        
+
         DeviceType::Cpu => Ok(Box::new(CpuBackend::default())),
     }
 }
@@ -171,30 +173,30 @@ pub fn get_backend_for_device(device_type: DeviceType) -> Result<Box<dyn GpuBack
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_detect_devices() {
         let devices = detect_devices();
         assert!(!devices.is_empty());
-        
+
         // CPU fallback should always be present
         let has_cpu = devices.iter().any(|d| d.device_type == DeviceType::Cpu);
         assert!(has_cpu);
     }
-    
+
     #[test]
     fn test_device_type_display() {
         assert_eq!(format!("{}", DeviceType::Cuda), "CUDA");
         assert_eq!(format!("{}", DeviceType::Metal), "Metal");
         assert_eq!(format!("{}", DeviceType::Cpu), "CPU");
     }
-    
+
     #[test]
     fn test_get_backend() {
         let backend = get_backend();
         assert!(backend.is_ok());
     }
-    
+
     #[test]
     fn test_get_cpu_backend() {
         let backend = get_backend_for_device(DeviceType::Cpu);

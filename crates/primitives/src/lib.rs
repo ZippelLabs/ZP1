@@ -8,14 +8,14 @@
 //! - Range-check helpers
 //! - Plonky3 interoperability for SIMD-optimized operations
 
-pub mod field;
-pub mod extension;
-pub mod limbs;
 pub mod circle;
+pub mod extension;
+pub mod field;
+pub mod limbs;
 pub mod p3_interop;
 
-pub use field::M31;
+pub use circle::{CircleDomain, CircleFFT, CirclePoint, Coset, FastCircleFFT};
 pub use extension::{CM31, QM31, U_SQUARED};
-pub use limbs::{to_limbs, from_limbs};
-pub use circle::{CirclePoint, CircleDomain, CircleFFT, Coset, FastCircleFFT};
-pub use p3_interop::{to_p3, from_p3, P3M31};
+pub use field::M31;
+pub use limbs::{from_limbs, to_limbs};
+pub use p3_interop::{from_p3, to_p3, P3M31};

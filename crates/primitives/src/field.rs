@@ -4,8 +4,8 @@
 //! This field is efficient for STARK proving due to fast reduction
 //! and good NTT-friendly properties via Circle STARKs or extension towers.
 
-use core::ops::{Add, AddAssign, Sub, SubAssign, Mul, MulAssign, Neg};
 use bytemuck::{Pod, Zeroable};
+use core::ops::{Add, AddAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
 
 /// The Mersenne31 prime: 2^31 - 1
@@ -15,7 +15,9 @@ pub const P: u32 = (1 << 31) - 1;
 ///
 /// Internally stored as a u32 in the range [0, P).
 /// All arithmetic operations maintain this invariant.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Pod, Zeroable, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Pod, Zeroable, Serialize, Deserialize,
+)]
 #[repr(transparent)]
 pub struct M31(pub u32);
 
@@ -46,7 +48,11 @@ impl M31 {
     #[inline]
     const fn reduce(val: u32) -> u32 {
         let reduced = val.wrapping_sub(P);
-        if reduced < P { reduced } else { val }
+        if reduced < P {
+            reduced
+        } else {
+            val
+        }
     }
 
     /// Reduce a u64 product to M31.

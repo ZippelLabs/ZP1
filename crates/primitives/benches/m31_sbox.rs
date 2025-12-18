@@ -4,7 +4,7 @@
 //! difference between M31 (which requires x^5 or higher) and fields like
 //! Koalabear/BabyBear that could use cheaper sboxes like x^3.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use zp1_primitives::M31;
 
 /// Compute x^3 (simulating cheaper sbox, e.g. Koalabear if valid)
@@ -37,21 +37,13 @@ fn bench_field_ops(c: &mut Criterion) {
     let a = M31::new(0x12345678);
     let b = M31::new(0x7654321);
 
-    group.bench_function("add", |bench| {
-        bench.iter(|| black_box(a) + black_box(b))
-    });
+    group.bench_function("add", |bench| bench.iter(|| black_box(a) + black_box(b)));
 
-    group.bench_function("mul", |bench| {
-        bench.iter(|| black_box(a) * black_box(b))
-    });
+    group.bench_function("mul", |bench| bench.iter(|| black_box(a) * black_box(b)));
 
-    group.bench_function("square", |bench| {
-        bench.iter(|| black_box(a).square())
-    });
+    group.bench_function("square", |bench| bench.iter(|| black_box(a).square()));
 
-    group.bench_function("inverse", |bench| {
-        bench.iter(|| black_box(a).inv())
-    });
+    group.bench_function("inverse", |bench| bench.iter(|| black_box(a).inv()));
 
     group.finish();
 }
@@ -89,7 +81,9 @@ fn bench_batch_sbox(c: &mut Criterion) {
     ] {
         group.bench_with_input(BenchmarkId::new(name, "1000"), &batch, |bench, data| {
             bench.iter(|| {
-                data.iter().map(|&x| sbox_fn(black_box(x))).collect::<Vec<_>>()
+                data.iter()
+                    .map(|&x| sbox_fn(black_box(x)))
+                    .collect::<Vec<_>>()
             })
         });
     }

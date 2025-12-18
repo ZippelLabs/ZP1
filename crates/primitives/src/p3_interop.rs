@@ -13,13 +13,13 @@
 //! Using these can provide 2-8x speedups for field-heavy operations.
 //!
 //! # DFT Support
-//! 
+//!
 //! The `p3_fast_dft` function provides O(n log n) FFT using Plonky3's Radix2Dit.
 
 use crate::field::M31;
-use p3_field::{PrimeCharacteristicRing, PrimeField32};
-use p3_field::extension::Complex;
 pub use p3_dft::TwoAdicSubgroupDft;
+use p3_field::extension::Complex;
+use p3_field::{PrimeCharacteristicRing, PrimeField32};
 pub use p3_mersenne_31::{Mersenne31 as P3M31, Mersenne31ComplexRadix2Dit};
 
 /// Convert ZP1 M31 to Plonky3 Mersenne31.
@@ -48,7 +48,7 @@ pub fn from_p3_vec(v: &[P3M31]) -> Vec<M31> {
 pub type P3Complex = Complex<P3M31>;
 
 /// Perform O(n log n) DFT using Plonky3's optimized Radix-2 DIT.
-/// 
+///
 /// This function takes a slice of ZP1 M31 values, converts them to Plonky3's
 /// Complex<Mersenne31>, runs the DFT, and converts back.
 ///
@@ -59,27 +59,30 @@ pub type P3Complex = Complex<P3M31>;
 /// Evaluations on a 2-adic subgroup of the complex extension
 pub fn p3_dft(coeffs: &[M31]) -> Vec<(M31, M31)> {
     use p3_matrix::dense::RowMajorMatrix;
-    
+
     if coeffs.is_empty() {
         return vec![];
     }
-    
+
     // Pad to power of 2
     let len = coeffs.len().next_power_of_two();
-    
+
     // Convert to Complex<P3M31> - embed M31 as real part
-    let mut complex_coeffs: Vec<P3Complex> = coeffs.iter()
+    let mut complex_coeffs: Vec<P3Complex> = coeffs
+        .iter()
         .map(|&m| P3Complex::new_real(to_p3(m)))
         .collect();
     complex_coeffs.resize(len, P3Complex::ZERO);
-    
+
     // Create matrix and run DFT
     let mat = RowMajorMatrix::new_col(complex_coeffs);
     let dft = Mersenne31ComplexRadix2Dit;
     let result = dft.dft_batch(mat);
-    
+
     // Convert back to ZP1 (real, imag) pairs
-    result.values.iter()
+    result
+        .values
+        .iter()
         .map(|c| (from_p3(c.real()), from_p3(c.imag())))
         .collect()
 }
@@ -87,23 +90,26 @@ pub fn p3_dft(coeffs: &[M31]) -> Vec<(M31, M31)> {
 /// Perform O(n log n) inverse DFT using Plonky3.
 pub fn p3_idft(evals: &[(M31, M31)]) -> Vec<(M31, M31)> {
     use p3_matrix::dense::RowMajorMatrix;
-    
+
     if evals.is_empty() {
         return vec![];
     }
-    
+
     // Convert to Complex<P3M31>
-    let complex_evals: Vec<P3Complex> = evals.iter()
+    let complex_evals: Vec<P3Complex> = evals
+        .iter()
         .map(|&(r, i)| P3Complex::new_complex(to_p3(r), to_p3(i)))
         .collect();
-    
+
     // Create matrix and run IDFT
     let mat = RowMajorMatrix::new_col(complex_evals);
     let dft = Mersenne31ComplexRadix2Dit;
     let result = dft.idft_batch(mat);
-    
+
     // Convert back
-    result.values.iter()
+    result
+        .values
+        .iter()
         .map(|c| (from_p3(c.real()), from_p3(c.imag())))
         .collect()
 }
@@ -122,26 +128,26 @@ mod tests {
             assert_eq!(zp1, back, "Roundtrip failed for {}", i);
         }
     }
-    
+
     #[test]
     fn test_arithmetic_compatibility() {
         let a = M31::new(12345);
         let b = M31::new(67890);
-        
+
         // ZP1 arithmetic
         let zp1_sum = a + b;
         let zp1_prod = a * b;
-        
+
         // P3 arithmetic
         let p3_a = to_p3(a);
         let p3_b = to_p3(b);
         let p3_sum = p3_a + p3_b;
         let p3_prod = p3_a * p3_b;
-        
+
         assert_eq!(zp1_sum, from_p3(p3_sum), "Sum mismatch");
         assert_eq!(zp1_prod, from_p3(p3_prod), "Product mismatch");
     }
-    
+
     #[test]
     fn test_p3_has_simd() {
         // This test verifies Plonky3 is correctly configured
@@ -150,20 +156,20 @@ mod tests {
         assert!(!one.is_zero());
         assert!(!gen.is_zero());
     }
-    
+
     #[test]
     fn test_p3_dft_roundtrip() {
         // Test O(n log n) DFT roundtrip
         let coeffs: Vec<M31> = (0..8).map(|i| M31::new(i * 10 + 1)).collect();
-        
+
         // Forward DFT
         let evals = p3_dft(&coeffs);
         assert_eq!(evals.len(), 8, "DFT should return 8 evaluations");
-        
+
         // Inverse DFT
         let recovered = p3_idft(&evals);
         assert_eq!(recovered.len(), 8, "IDFT should return 8 coefficients");
-        
+
         // Check roundtrip (real parts should match, imaginary should be ~0)
         for (i, ((r, _), orig)) in recovered.iter().zip(coeffs.iter()).enumerate() {
             assert_eq!(*r, *orig, "DFT roundtrip failed at index {}", i);

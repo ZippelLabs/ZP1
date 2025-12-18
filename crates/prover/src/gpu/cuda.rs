@@ -314,21 +314,21 @@ impl CudaBackend {
         // 2. Query device properties
         // 3. Compile PTX kernels
         // 4. Create streams
-        
+
         // Check if CUDA is available (placeholder)
         #[cfg(not(feature = "cuda"))]
         {
             return Err(GpuError::DeviceNotAvailable(
-                "CUDA support not compiled. Enable 'cuda' feature.".to_string()
+                "CUDA support not compiled. Enable 'cuda' feature.".to_string(),
             ));
         }
-        
+
         #[cfg(feature = "cuda")]
         {
             Ok(Self {
                 device_index,
                 device_name: format!("NVIDIA GPU {}", device_index),
-                sm_count: 80, // Would query from device
+                sm_count: 80,                              // Would query from device
                 available_memory: 16 * 1024 * 1024 * 1024, // 16GB typical
                 twiddles: Vec::new(),
                 inv_twiddles: Vec::new(),
@@ -340,30 +340,31 @@ impl CudaBackend {
     /// Precompute twiddle factors for given size.
     pub fn precompute_twiddles(&mut self, log_n: usize) -> Result<(), GpuError> {
         if log_n > self.max_log_n {
-            return Err(GpuError::NotSupported(
-                format!("log_n {} exceeds maximum {}", log_n, self.max_log_n)
-            ));
+            return Err(GpuError::NotSupported(format!(
+                "log_n {} exceeds maximum {}",
+                log_n, self.max_log_n
+            )));
         }
 
         let n = 1usize << log_n;
         const M31_P: u64 = (1u64 << 31) - 1;
-        
+
         // Using a simplified generator
         let generator = 5u64;
         let order = M31_P - 1;
         let step = order / (n as u64);
-        
+
         self.twiddles = Vec::with_capacity(n);
         self.inv_twiddles = Vec::with_capacity(n);
-        
+
         let mut w = 1u64;
         for _ in 0..n {
             self.twiddles.push(w as u32);
             w = (w * pow_mod(generator, step, M31_P)) % M31_P;
         }
-        
+
         self.inv_twiddles = self.twiddles.iter().rev().cloned().collect();
-        
+
         Ok(())
     }
 
@@ -383,7 +384,7 @@ fn pow_mod(base: u64, exp: u64, modulus: u64) -> u64 {
     let mut result = 1u64;
     let mut base = base % modulus;
     let mut exp = exp;
-    
+
     while exp > 0 {
         if exp & 1 == 1 {
             result = (result * base) % modulus;
@@ -391,7 +392,7 @@ fn pow_mod(base: u64, exp: u64, modulus: u64) -> u64 {
         exp >>= 1;
         base = (base * base) % modulus;
     }
-    
+
     result
 }
 
@@ -415,7 +416,7 @@ impl GpuMemory for CudaMemory {
     fn size(&self) -> usize {
         self.data.len()
     }
-    
+
     fn copy_from_host(&mut self, data: &[u8]) -> Result<(), GpuError> {
         // In real implementation: cudaMemcpy(device, host, size, cudaMemcpyHostToDevice)
         if data.len() > self.data.len() {
@@ -427,7 +428,7 @@ impl GpuMemory for CudaMemory {
         self.data[..data.len()].copy_from_slice(data);
         Ok(())
     }
-    
+
     fn copy_to_host(&self, data: &mut [u8]) -> Result<(), GpuError> {
         // In real implementation: cudaMemcpy(host, device, size, cudaMemcpyDeviceToHost)
         if data.len() > self.data.len() {
@@ -439,11 +440,11 @@ impl GpuMemory for CudaMemory {
         data.copy_from_slice(&self.data[..data.len()]);
         Ok(())
     }
-    
+
     fn as_ptr(&self) -> *const u8 {
         self.data.as_ptr()
     }
-    
+
     fn as_mut_ptr(&mut self) -> *mut u8 {
         self.data.as_mut_ptr()
     }
@@ -474,20 +475,20 @@ impl GpuDevice for CudaDevice {
     fn device_type(&self) -> DeviceType {
         DeviceType::Cuda
     }
-    
+
     fn name(&self) -> &str {
         &self.name
     }
-    
+
     fn allocate(&self, size: usize) -> Result<Box<dyn GpuMemory>, GpuError> {
         Ok(Box::new(CudaMemory::new(size)?))
     }
-    
+
     fn synchronize(&self) -> Result<(), GpuError> {
         // In real implementation: cudaDeviceSynchronize
         Ok(())
     }
-    
+
     fn available_memory(&self) -> usize {
         self.memory_bytes
     }
@@ -499,7 +500,7 @@ impl GpuBackend for CudaBackend {
         static DEVICE: std::sync::OnceLock<CudaDevice> = std::sync::OnceLock::new();
         DEVICE.get_or_init(|| CudaDevice::new(0).unwrap())
     }
-    
+
     fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
         let n = 1usize << log_n;
         if values.len() != n {
@@ -508,9 +509,9 @@ impl GpuBackend for CudaBackend {
                 actual: values.len(),
             });
         }
-        
+
         // CPU fallback (real impl would launch CUDA kernels)
-        
+
         // Bit-reversal permutation
         for i in 0..n {
             let j = bit_reverse(i, log_n);
@@ -518,35 +519,35 @@ impl GpuBackend for CudaBackend {
                 values.swap(i, j);
             }
         }
-        
+
         // Cooley-Tukey butterfly stages
         for stage in 0..log_n {
             let half_step = 1usize << stage;
             let step = half_step << 1;
-            
+
             for group in (0..n).step_by(step) {
                 for pos in 0..half_step {
                     let i = group + pos;
                     let j = i + half_step;
-                    
+
                     let w = if self.twiddles.is_empty() {
                         1u32
                     } else {
                         self.twiddles.get(pos * (n / step)).copied().unwrap_or(1)
                     };
-                    
+
                     let u = values[i];
                     let v = m31_mul(values[j], w);
-                    
+
                     values[i] = m31_add(u, v);
                     values[j] = m31_sub(u, v);
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     fn intt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
         let n = 1usize << log_n;
         if values.len() != n {
@@ -555,34 +556,37 @@ impl GpuBackend for CudaBackend {
                 actual: values.len(),
             });
         }
-        
+
         const M31_P: u32 = (1u32 << 31) - 1;
-        
+
         // Gentleman-Sande butterfly stages
         for stage in (0..log_n).rev() {
             let half_step = 1usize << stage;
             let step = half_step << 1;
-            
+
             for group in (0..n).step_by(step) {
                 for pos in 0..half_step {
                     let i = group + pos;
                     let j = i + half_step;
-                    
+
                     let w = if self.inv_twiddles.is_empty() {
                         1u32
                     } else {
-                        self.inv_twiddles.get(pos * (n / step)).copied().unwrap_or(1)
+                        self.inv_twiddles
+                            .get(pos * (n / step))
+                            .copied()
+                            .unwrap_or(1)
                     };
-                    
+
                     let u = values[i];
                     let v = values[j];
-                    
+
                     values[i] = m31_add(u, v);
                     values[j] = m31_mul(m31_sub(u, v), w);
                 }
             }
         }
-        
+
         // Bit-reversal permutation
         for i in 0..n {
             let j = bit_reverse(i, log_n);
@@ -590,16 +594,16 @@ impl GpuBackend for CudaBackend {
                 values.swap(i, j);
             }
         }
-        
+
         // Scale by 1/n
         let inv_n = mod_inverse(n as u32, M31_P);
         for v in values.iter_mut() {
             *v = m31_mul(*v, inv_n);
         }
-        
+
         Ok(())
     }
-    
+
     fn batch_evaluate(
         &self,
         coeffs: &[u32],
@@ -612,7 +616,7 @@ impl GpuBackend for CudaBackend {
                 actual: results.len(),
             });
         }
-        
+
         // CPU fallback: Horner's method
         // Real impl would launch poly_eval_batch kernel
         for (i, &point) in points.iter().enumerate() {
@@ -622,10 +626,10 @@ impl GpuBackend for CudaBackend {
             }
             results[i] = result;
         }
-        
+
         Ok(())
     }
-    
+
     fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
         let n = leaves.len();
         if n == 0 || !n.is_power_of_two() {
@@ -634,14 +638,14 @@ impl GpuBackend for CudaBackend {
                 actual: n,
             });
         }
-        
+
         // Build tree bottom-up
         // Real impl would launch merkle_layer kernel for each level
         let tree_size = 2 * n - 1;
         let mut tree = vec![[0u8; 32]; tree_size];
-        
+
         tree[n - 1..].copy_from_slice(leaves);
-        
+
         for i in (0..n - 1).rev() {
             // Compute hash of children
             let mut hash = [0u8; 32];
@@ -654,28 +658,28 @@ impl GpuBackend for CudaBackend {
             }
             tree[i] = hash;
         }
-        
+
         Ok(tree)
     }
-    
+
     fn lde(&self, coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
         let n = coeffs.len();
         let extended_n = n * blowup_factor;
-        
+
         if !n.is_power_of_two() || !blowup_factor.is_power_of_two() {
             return Err(GpuError::InvalidBufferSize {
                 expected: n.next_power_of_two(),
                 actual: n,
             });
         }
-        
+
         // CPU fallback
         // Real impl would launch lde_evaluate kernel
         let mut results = vec![0u32; extended_n];
-        
+
         let generator = 3u32;
         let mut point = generator;
-        
+
         for i in 0..extended_n {
             let mut result = 0u32;
             for &coeff in coeffs.iter().rev() {
@@ -684,7 +688,7 @@ impl GpuBackend for CudaBackend {
             results[i] = result;
             point = m31_mul(point, generator);
         }
-        
+
         Ok(results)
     }
 }
@@ -696,12 +700,20 @@ const M31_P: u32 = (1u32 << 31) - 1;
 #[inline]
 fn m31_add(a: u32, b: u32) -> u32 {
     let sum = a.wrapping_add(b);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
 fn m31_sub(a: u32, b: u32) -> u32 {
-    if a >= b { a - b } else { M31_P - b + a }
+    if a >= b {
+        a - b
+    } else {
+        M31_P - b + a
+    }
 }
 
 #[inline]
@@ -710,7 +722,11 @@ fn m31_mul(a: u32, b: u32) -> u32 {
     let lo = (prod & (M31_P as u64)) as u32;
     let hi = (prod >> 31) as u32;
     let sum = lo.wrapping_add(hi);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
@@ -723,13 +739,13 @@ fn mod_inverse(a: u32, m: u32) -> u32 {
     let mut r = a as i64;
     let mut old_s = 0i64;
     let mut s = 1i64;
-    
+
     while r != 0 {
         let q = old_r / r;
         (old_r, r) = (r, old_r - q * r);
         (old_s, s) = (s, old_s - q * s);
     }
-    
+
     if old_s < 0 {
         (old_s + m as i64) as u32
     } else {
@@ -770,46 +786,46 @@ pub struct CudaDeviceInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_m31_arithmetic() {
         assert_eq!(m31_add(100, 200), 300);
         assert_eq!(m31_add(M31_P - 1, 2), 1);
-        
+
         assert_eq!(m31_sub(200, 100), 100);
         assert_eq!(m31_sub(100, 200), M31_P - 100);
-        
+
         assert_eq!(m31_mul(2, 3), 6);
         assert_eq!(m31_mul(M31_P - 1, 2), M31_P - 2);
     }
-    
+
     #[test]
     fn test_bit_reverse() {
         assert_eq!(bit_reverse(0b000, 3), 0b000);
         assert_eq!(bit_reverse(0b001, 3), 0b100);
         assert_eq!(bit_reverse(0b010, 3), 0b010);
     }
-    
+
     #[test]
     fn test_mod_inverse() {
         let inv = mod_inverse(3, M31_P);
         assert_eq!(m31_mul(3, inv), 1);
     }
-    
+
     #[test]
     fn test_query_cuda_devices() {
         let devices = query_cuda_devices();
         assert!(!devices.is_empty());
     }
-    
+
     #[test]
     fn test_cuda_memory() {
         let mut mem = CudaMemory::new(1024).unwrap();
         assert_eq!(mem.size(), 1024);
-        
+
         let data = vec![1u8; 512];
         mem.copy_from_host(&data).unwrap();
-        
+
         let mut output = vec![0u8; 512];
         mem.copy_to_host(&mut output).unwrap();
         assert_eq!(data, output);

@@ -315,7 +315,7 @@ kernel void merkle_layer(
 #[cfg(all(target_os = "macos", feature = "gpu-metal"))]
 mod native {
     use super::*;
-    use metal::{Device, CommandQueue, Library, ComputePipelineState, Buffer, MTLResourceOptions};
+    use metal::{Buffer, CommandQueue, ComputePipelineState, Device, Library, MTLResourceOptions};
     use std::sync::Arc;
 
     /// Native Metal backend using metal-rs crate.
@@ -344,22 +344,25 @@ mod native {
         pub fn new() -> Result<Self, GpuError> {
             let device = Device::system_default()
                 .ok_or_else(|| GpuError::DeviceNotAvailable("No Metal device found".to_string()))?;
-            
+
             let command_queue = device.new_command_queue();
-            
+
             // Compile shaders
-            let library = device.new_library_with_source(METAL_M31_SHADERS, &metal::CompileOptions::new())
+            let library = device
+                .new_library_with_source(METAL_M31_SHADERS, &metal::CompileOptions::new())
                 .map_err(|e| GpuError::KernelError(format!("Shader compilation failed: {}", e)))?;
-            
+
             // Create pipeline states for each kernel
             let ntt_butterfly_pipeline = Self::create_pipeline(&device, &library, "ntt_butterfly")?;
-            let intt_butterfly_pipeline = Self::create_pipeline(&device, &library, "intt_butterfly")?;
+            let intt_butterfly_pipeline =
+                Self::create_pipeline(&device, &library, "intt_butterfly")?;
             let intt_scale_pipeline = Self::create_pipeline(&device, &library, "intt_scale")?;
-            let bit_reverse_pipeline = Self::create_pipeline(&device, &library, "bit_reverse_permute")?;
+            let bit_reverse_pipeline =
+                Self::create_pipeline(&device, &library, "bit_reverse_permute")?;
             let poly_eval_pipeline = Self::create_pipeline(&device, &library, "poly_eval_batch")?;
             let lde_pipeline = Self::create_pipeline(&device, &library, "lde_evaluate")?;
             let merkle_layer_pipeline = Self::create_pipeline(&device, &library, "merkle_layer")?;
-            
+
             Ok(Self {
                 device,
                 command_queue,
@@ -378,39 +381,48 @@ mod native {
                 max_log_n: 24,
             })
         }
-        
-        fn create_pipeline(device: &Device, library: &Library, name: &str) -> Result<ComputePipelineState, GpuError> {
-            let function = library.get_function(name, None)
-                .map_err(|e| GpuError::KernelError(format!("Function '{}' not found: {}", name, e)))?;
-            
-            device.new_compute_pipeline_state_with_function(&function)
-                .map_err(|e| GpuError::KernelError(format!("Pipeline creation failed for '{}': {}", name, e)))
+
+        fn create_pipeline(
+            device: &Device,
+            library: &Library,
+            name: &str,
+        ) -> Result<ComputePipelineState, GpuError> {
+            let function = library.get_function(name, None).map_err(|e| {
+                GpuError::KernelError(format!("Function '{}' not found: {}", name, e))
+            })?;
+
+            device
+                .new_compute_pipeline_state_with_function(&function)
+                .map_err(|e| {
+                    GpuError::KernelError(format!("Pipeline creation failed for '{}': {}", name, e))
+                })
         }
-        
+
         /// Precompute twiddle factors for NTT.
         pub fn precompute_twiddles(&mut self, log_n: usize) -> Result<(), GpuError> {
             if log_n > self.max_log_n {
-                return Err(GpuError::NotSupported(
-                    format!("log_n {} exceeds maximum {}", log_n, self.max_log_n)
-                ));
+                return Err(GpuError::NotSupported(format!(
+                    "log_n {} exceeds maximum {}",
+                    log_n, self.max_log_n
+                )));
             }
-            
+
             let n = 1usize << log_n;
             const M31_P: u64 = (1u64 << 31) - 1;
-            
+
             let generator = 5u64;
             let order = M31_P - 1;
             let step = order / (n as u64);
-            
+
             self.twiddles = Vec::with_capacity(n);
             let mut w = 1u64;
             for _ in 0..n {
                 self.twiddles.push(w as u32);
                 w = (w * pow_mod(generator, step, M31_P)) % M31_P;
             }
-            
+
             self.inv_twiddles = self.twiddles.iter().rev().cloned().collect();
-            
+
             // Create GPU buffers for twiddles
             let twiddle_bytes = bytemuck::cast_slice::<u32, u8>(&self.twiddles);
             self.twiddle_buffer = Some(self.device.new_buffer_with_data(
@@ -418,27 +430,33 @@ mod native {
                 twiddle_bytes.len() as u64,
                 MTLResourceOptions::StorageModeShared,
             ));
-            
+
             let inv_twiddle_bytes = bytemuck::cast_slice::<u32, u8>(&self.inv_twiddles);
             self.inv_twiddle_buffer = Some(self.device.new_buffer_with_data(
                 inv_twiddle_bytes.as_ptr() as *const _,
                 inv_twiddle_bytes.len() as u64,
                 MTLResourceOptions::StorageModeShared,
             ));
-            
+
             Ok(())
         }
-        
-        fn execute_ntt_gpu(&self, values: &mut [u32], log_n: usize, inverse: bool) -> Result<(), GpuError> {
+
+        fn execute_ntt_gpu(
+            &self,
+            values: &mut [u32],
+            log_n: usize,
+            inverse: bool,
+        ) -> Result<(), GpuError> {
             let n = 1usize << log_n;
-            
+
             // Ensure twiddles are precomputed
             let twiddle_buffer = if inverse {
                 self.inv_twiddle_buffer.as_ref()
             } else {
                 self.twiddle_buffer.as_ref()
-            }.ok_or_else(|| GpuError::NotSupported("Twiddles not precomputed".to_string()))?;
-            
+            }
+            .ok_or_else(|| GpuError::NotSupported("Twiddles not precomputed".to_string()))?;
+
             // Create data buffer
             let data_bytes = bytemuck::cast_slice::<u32, u8>(values);
             let data_buffer = self.device.new_buffer_with_data(
@@ -446,93 +464,118 @@ mod native {
                 data_bytes.len() as u64,
                 MTLResourceOptions::StorageModeShared,
             );
-            
+
             let command_buffer = self.command_queue.new_command_buffer();
-            
+
             // Bit-reverse permutation
             {
                 let encoder = command_buffer.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.bit_reverse_pipeline);
                 encoder.set_buffer(0, Some(&data_buffer), 0);
-                encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &(n as u32) as *const u32 as *const _);
-                encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &(log_n as u32) as *const u32 as *const _);
-                
+                encoder.set_bytes(
+                    1,
+                    std::mem::size_of::<u32>() as u64,
+                    &(n as u32) as *const u32 as *const _,
+                );
+                encoder.set_bytes(
+                    2,
+                    std::mem::size_of::<u32>() as u64,
+                    &(log_n as u32) as *const u32 as *const _,
+                );
+
                 let thread_group_size = metal::MTLSize::new(256, 1, 1);
                 let grid_size = metal::MTLSize::new(n as u64, 1, 1);
                 encoder.dispatch_threads(grid_size, thread_group_size);
                 encoder.end_encoding();
             }
-            
+
             // Butterfly stages
             let pipeline = if inverse {
                 &self.intt_butterfly_pipeline
             } else {
                 &self.ntt_butterfly_pipeline
             };
-            
+
             let stages: Box<dyn Iterator<Item = usize>> = if inverse {
                 Box::new((0..log_n).rev())
             } else {
                 Box::new(0..log_n)
             };
-            
+
             for stage in stages {
                 let encoder = command_buffer.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(pipeline);
                 encoder.set_buffer(0, Some(&data_buffer), 0);
-                encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &(n as u32) as *const u32 as *const _);
-                encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &(stage as u32) as *const u32 as *const _);
+                encoder.set_bytes(
+                    1,
+                    std::mem::size_of::<u32>() as u64,
+                    &(n as u32) as *const u32 as *const _,
+                );
+                encoder.set_bytes(
+                    2,
+                    std::mem::size_of::<u32>() as u64,
+                    &(stage as u32) as *const u32 as *const _,
+                );
                 encoder.set_buffer(3, Some(twiddle_buffer), 0);
-                
+
                 let threads_per_stage = n / 2;
-                let thread_group_size = metal::MTLSize::new(256.min(threads_per_stage as u64), 1, 1);
+                let thread_group_size =
+                    metal::MTLSize::new(256.min(threads_per_stage as u64), 1, 1);
                 let grid_size = metal::MTLSize::new(threads_per_stage as u64, 1, 1);
                 encoder.dispatch_threads(grid_size, thread_group_size);
                 encoder.end_encoding();
             }
-            
+
             // Scale for inverse NTT
             if inverse {
                 let inv_n = mod_inverse(n as u32, M31_P as u32);
                 let encoder = command_buffer.new_compute_command_encoder();
                 encoder.set_compute_pipeline_state(&self.intt_scale_pipeline);
                 encoder.set_buffer(0, Some(&data_buffer), 0);
-                encoder.set_bytes(1, std::mem::size_of::<u32>() as u64, &(n as u32) as *const u32 as *const _);
-                encoder.set_bytes(2, std::mem::size_of::<u32>() as u64, &inv_n as *const u32 as *const _);
-                
+                encoder.set_bytes(
+                    1,
+                    std::mem::size_of::<u32>() as u64,
+                    &(n as u32) as *const u32 as *const _,
+                );
+                encoder.set_bytes(
+                    2,
+                    std::mem::size_of::<u32>() as u64,
+                    &inv_n as *const u32 as *const _,
+                );
+
                 let thread_group_size = metal::MTLSize::new(256, 1, 1);
                 let grid_size = metal::MTLSize::new(n as u64, 1, 1);
                 encoder.dispatch_threads(grid_size, thread_group_size);
                 encoder.end_encoding();
             }
-            
+
             command_buffer.commit();
             command_buffer.wait_until_completed();
-            
+
             // Copy results back
             let result_ptr = data_buffer.contents() as *const u32;
             unsafe {
                 std::ptr::copy_nonoverlapping(result_ptr, values.as_mut_ptr(), n);
             }
-            
+
             Ok(())
         }
     }
-    
+
     impl GpuBackend for MetalBackend {
         fn device(&self) -> &dyn GpuDevice {
             static DEVICE: std::sync::OnceLock<MetalDeviceWrapper> = std::sync::OnceLock::new();
             DEVICE.get_or_init(|| MetalDeviceWrapper::new().unwrap())
         }
-        
+
         fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
             self.execute_ntt_gpu(values, log_n, false)
         }
-        
+
         fn intt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
             self.execute_ntt_gpu(values, log_n, true)
         }
-        
+
         fn batch_evaluate(
             &self,
             coeffs: &[u32],
@@ -541,7 +584,7 @@ mod native {
         ) -> Result<(), GpuError> {
             let num_points = points.len();
             let num_coeffs = coeffs.len();
-            
+
             // Create buffers
             let coeffs_buffer = self.device.new_buffer_with_data(
                 coeffs.as_ptr() as *const _,
@@ -557,42 +600,42 @@ mod native {
                 (num_points * 4) as u64,
                 MTLResourceOptions::StorageModeShared,
             );
-            
+
             let command_buffer = self.command_queue.new_command_buffer();
             let encoder = command_buffer.new_compute_command_encoder();
-            
+
             encoder.set_compute_pipeline_state(&self.poly_eval_pipeline);
             encoder.set_buffer(0, Some(&coeffs_buffer), 0);
             encoder.set_bytes(1, 4, &(num_coeffs as u32) as *const u32 as *const _);
             encoder.set_buffer(2, Some(&points_buffer), 0);
             encoder.set_buffer(3, Some(&results_buffer), 0);
-            
+
             let thread_group_size = metal::MTLSize::new(256.min(num_points as u64), 1, 1);
             let grid_size = metal::MTLSize::new(num_points as u64, 1, 1);
             encoder.dispatch_threads(grid_size, thread_group_size);
             encoder.end_encoding();
-            
+
             command_buffer.commit();
             command_buffer.wait_until_completed();
-            
+
             // Copy results
             let result_ptr = results_buffer.contents() as *const u32;
             unsafe {
                 std::ptr::copy_nonoverlapping(result_ptr, results.as_mut_ptr(), num_points);
             }
-            
+
             Ok(())
         }
-        
+
         fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
             // Use CPU fallback for now - Blake3 GPU implementation is complex
             cpu_merkle_tree(leaves)
         }
-        
+
         fn lde(&self, coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
             let n = coeffs.len();
             let extended_n = n * blowup_factor;
-            
+
             // Generate extended domain
             let mut domain = Vec::with_capacity(extended_n);
             let generator = 3u32;
@@ -601,18 +644,18 @@ mod native {
                 domain.push(point);
                 point = m31_mul(point, generator);
             }
-            
+
             let mut results = vec![0u32; extended_n];
             self.batch_evaluate(coeffs, &domain, &mut results)?;
             Ok(results)
         }
     }
-    
+
     pub struct MetalDeviceWrapper {
         name: String,
         memory_bytes: usize,
     }
-    
+
     impl MetalDeviceWrapper {
         pub fn new() -> Result<Self, GpuError> {
             let device = Device::system_default()
@@ -623,29 +666,41 @@ mod native {
             })
         }
     }
-    
+
     impl GpuDevice for MetalDeviceWrapper {
-        fn device_type(&self) -> DeviceType { DeviceType::Metal }
-        fn name(&self) -> &str { &self.name }
+        fn device_type(&self) -> DeviceType {
+            DeviceType::Metal
+        }
+        fn name(&self) -> &str {
+            &self.name
+        }
         fn allocate(&self, size: usize) -> Result<Box<dyn GpuMemory>, GpuError> {
             Ok(Box::new(MetalMemory::new(size)))
         }
-        fn synchronize(&self) -> Result<(), GpuError> { Ok(()) }
-        fn available_memory(&self) -> usize { self.memory_bytes }
+        fn synchronize(&self) -> Result<(), GpuError> {
+            Ok(())
+        }
+        fn available_memory(&self) -> usize {
+            self.memory_bytes
+        }
     }
-    
+
     pub struct MetalMemory {
         data: Vec<u8>,
     }
-    
+
     impl MetalMemory {
         pub fn new(size: usize) -> Self {
-            Self { data: vec![0u8; size] }
+            Self {
+                data: vec![0u8; size],
+            }
         }
     }
-    
+
     impl GpuMemory for MetalMemory {
-        fn size(&self) -> usize { self.data.len() }
+        fn size(&self) -> usize {
+            self.data.len()
+        }
         fn copy_from_host(&mut self, data: &[u8]) -> Result<(), GpuError> {
             self.data[..data.len()].copy_from_slice(data);
             Ok(())
@@ -654,8 +709,12 @@ mod native {
             data.copy_from_slice(&self.data[..data.len()]);
             Ok(())
         }
-        fn as_ptr(&self) -> *const u8 { self.data.as_ptr() }
-        fn as_mut_ptr(&mut self) -> *mut u8 { self.data.as_mut_ptr() }
+        fn as_ptr(&self) -> *const u8 {
+            self.data.as_ptr()
+        }
+        fn as_mut_ptr(&mut self) -> *mut u8 {
+            self.data.as_mut_ptr()
+        }
     }
 }
 
@@ -684,28 +743,29 @@ mod fallback {
                 max_log_n: 24,
             })
         }
-        
+
         pub fn precompute_twiddles(&mut self, log_n: usize) -> Result<(), GpuError> {
             if log_n > self.max_log_n {
-                return Err(GpuError::NotSupported(
-                    format!("log_n {} exceeds maximum {}", log_n, self.max_log_n)
-                ));
+                return Err(GpuError::NotSupported(format!(
+                    "log_n {} exceeds maximum {}",
+                    log_n, self.max_log_n
+                )));
             }
-            
+
             let n = 1usize << log_n;
             const M31_P: u64 = (1u64 << 31) - 1;
-            
+
             let generator = 5u64;
             let order = M31_P - 1;
             let step = order / (n as u64);
-            
+
             self.twiddles = Vec::with_capacity(n);
             let mut w = 1u64;
             for _ in 0..n {
                 self.twiddles.push(w as u32);
                 w = (w * pow_mod(generator, step, M31_P)) % M31_P;
             }
-            
+
             self.inv_twiddles = self.twiddles.iter().rev().cloned().collect();
             Ok(())
         }
@@ -716,15 +776,15 @@ mod fallback {
             static DEVICE: std::sync::OnceLock<MetalDevice> = std::sync::OnceLock::new();
             DEVICE.get_or_init(|| MetalDevice::new().unwrap())
         }
-        
+
         fn ntt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
             cpu_ntt(values, log_n, &self.twiddles, false)
         }
-        
+
         fn intt_m31(&self, values: &mut [u32], log_n: usize) -> Result<(), GpuError> {
             cpu_ntt(values, log_n, &self.inv_twiddles, true)
         }
-        
+
         fn batch_evaluate(
             &self,
             coeffs: &[u32],
@@ -733,11 +793,11 @@ mod fallback {
         ) -> Result<(), GpuError> {
             cpu_batch_evaluate(coeffs, points, results)
         }
-        
+
         fn merkle_tree(&self, leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
             cpu_merkle_tree(leaves)
         }
-        
+
         fn lde(&self, coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
             cpu_lde(coeffs, blowup_factor)
         }
@@ -770,13 +830,21 @@ mod fallback {
     }
 
     impl GpuDevice for MetalDevice {
-        fn device_type(&self) -> DeviceType { DeviceType::Metal }
-        fn name(&self) -> &str { &self.name }
+        fn device_type(&self) -> DeviceType {
+            DeviceType::Metal
+        }
+        fn name(&self) -> &str {
+            &self.name
+        }
         fn allocate(&self, size: usize) -> Result<Box<dyn GpuMemory>, GpuError> {
             Ok(Box::new(MetalMemory::new(size)))
         }
-        fn synchronize(&self) -> Result<(), GpuError> { Ok(()) }
-        fn available_memory(&self) -> usize { self.memory_bytes }
+        fn synchronize(&self) -> Result<(), GpuError> {
+            Ok(())
+        }
+        fn available_memory(&self) -> usize {
+            self.memory_bytes
+        }
     }
 
     pub struct MetalMemory {
@@ -785,12 +853,16 @@ mod fallback {
 
     impl MetalMemory {
         pub fn new(size: usize) -> Self {
-            Self { data: vec![0u8; size] }
+            Self {
+                data: vec![0u8; size],
+            }
         }
     }
 
     impl GpuMemory for MetalMemory {
-        fn size(&self) -> usize { self.data.len() }
+        fn size(&self) -> usize {
+            self.data.len()
+        }
         fn copy_from_host(&mut self, data: &[u8]) -> Result<(), GpuError> {
             self.data[..data.len()].copy_from_slice(data);
             Ok(())
@@ -799,8 +871,12 @@ mod fallback {
             data.copy_from_slice(&self.data[..data.len()]);
             Ok(())
         }
-        fn as_ptr(&self) -> *const u8 { self.data.as_ptr() }
-        fn as_mut_ptr(&mut self) -> *mut u8 { self.data.as_mut_ptr() }
+        fn as_ptr(&self) -> *const u8 {
+            self.data.as_ptr()
+        }
+        fn as_mut_ptr(&mut self) -> *mut u8 {
+            self.data.as_mut_ptr()
+        }
     }
 }
 
@@ -823,12 +899,20 @@ const M31_P: u32 = (1u32 << 31) - 1;
 #[inline]
 fn m31_add(a: u32, b: u32) -> u32 {
     let sum = a.wrapping_add(b);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
 fn m31_sub(a: u32, b: u32) -> u32 {
-    if a >= b { a - b } else { M31_P - b + a }
+    if a >= b {
+        a - b
+    } else {
+        M31_P - b + a
+    }
 }
 
 #[inline]
@@ -837,7 +921,11 @@ fn m31_mul(a: u32, b: u32) -> u32 {
     let lo = (prod & (M31_P as u64)) as u32;
     let hi = (prod >> 31) as u32;
     let sum = lo.wrapping_add(hi);
-    if sum >= M31_P { sum - M31_P } else { sum }
+    if sum >= M31_P {
+        sum - M31_P
+    } else {
+        sum
+    }
 }
 
 #[inline]
@@ -849,7 +937,7 @@ fn pow_mod(base: u64, exp: u64, modulus: u64) -> u64 {
     let mut result = 1u64;
     let mut base = base % modulus;
     let mut exp = exp;
-    
+
     while exp > 0 {
         if exp & 1 == 1 {
             result = (result * base) % modulus;
@@ -865,13 +953,13 @@ fn mod_inverse(a: u32, m: u32) -> u32 {
     let mut r = a as i64;
     let mut old_s = 0i64;
     let mut s = 1i64;
-    
+
     while r != 0 {
         let q = old_r / r;
         (old_r, r) = (r, old_r - q * r);
         (old_s, s) = (s, old_s - q * s);
     }
-    
+
     if old_s < 0 {
         (old_s + m as i64) as u32
     } else {
@@ -879,7 +967,12 @@ fn mod_inverse(a: u32, m: u32) -> u32 {
     }
 }
 
-fn cpu_ntt(values: &mut [u32], log_n: usize, twiddles: &[u32], inverse: bool) -> Result<(), GpuError> {
+fn cpu_ntt(
+    values: &mut [u32],
+    log_n: usize,
+    twiddles: &[u32],
+    inverse: bool,
+) -> Result<(), GpuError> {
     let n = 1usize << log_n;
     if values.len() != n {
         return Err(GpuError::InvalidBufferSize {
@@ -887,7 +980,7 @@ fn cpu_ntt(values: &mut [u32], log_n: usize, twiddles: &[u32], inverse: bool) ->
             actual: values.len(),
         });
     }
-    
+
     // Bit-reversal permutation
     for i in 0..n {
         let j = bit_reverse(i, log_n);
@@ -895,27 +988,27 @@ fn cpu_ntt(values: &mut [u32], log_n: usize, twiddles: &[u32], inverse: bool) ->
             values.swap(i, j);
         }
     }
-    
+
     // Butterfly stages
     for stage in 0..log_n {
         let half_step = 1usize << stage;
         let step = half_step << 1;
-        
+
         for group in (0..n).step_by(step) {
             for pos in 0..half_step {
                 let i = group + pos;
                 let j = i + half_step;
-                
+
                 let w = twiddles.get(pos * (n / step)).copied().unwrap_or(1);
                 let u = values[i];
                 let v = m31_mul(values[j], w);
-                
+
                 values[i] = m31_add(u, v);
                 values[j] = m31_sub(u, v);
             }
         }
     }
-    
+
     // Scale for inverse
     if inverse {
         let inv_n = mod_inverse(n as u32, M31_P);
@@ -923,7 +1016,7 @@ fn cpu_ntt(values: &mut [u32], log_n: usize, twiddles: &[u32], inverse: bool) ->
             *v = m31_mul(*v, inv_n);
         }
     }
-    
+
     Ok(())
 }
 
@@ -946,11 +1039,11 @@ fn cpu_merkle_tree(leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
             actual: n,
         });
     }
-    
+
     let tree_size = 2 * n - 1;
     let mut tree = vec![[0u8; 32]; tree_size];
     tree[n - 1..].copy_from_slice(leaves);
-    
+
     for i in (0..n - 1).rev() {
         let mut hash = [0u8; 32];
         let left_idx = 2 * i + 1;
@@ -962,7 +1055,7 @@ fn cpu_merkle_tree(leaves: &[[u8; 32]]) -> Result<Vec<[u8; 32]>, GpuError> {
         }
         tree[i] = hash;
     }
-    
+
     Ok(tree)
 }
 
@@ -970,10 +1063,10 @@ fn cpu_lde(coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
     let n = coeffs.len();
     let extended_n = n * blowup_factor;
     let mut results = vec![0u32; extended_n];
-    
+
     let generator = 3u32;
     let mut point = generator;
-    
+
     for i in 0..extended_n {
         let mut result = 0u32;
         for &coeff in coeffs.iter().rev() {
@@ -982,7 +1075,7 @@ fn cpu_lde(coeffs: &[u32], blowup_factor: usize) -> Result<Vec<u32>, GpuError> {
         results[i] = result;
         point = m31_mul(point, generator);
     }
-    
+
     Ok(results)
 }
 
@@ -996,49 +1089,51 @@ impl Default for native::MetalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_m31_arithmetic() {
         assert_eq!(m31_add(100, 200), 300);
         assert_eq!(m31_add(M31_P - 1, 2), 1);
-        
+
         assert_eq!(m31_sub(200, 100), 100);
-        
+
         assert_eq!(m31_mul(2, 3), 6);
     }
-    
+
     #[test]
     fn test_bit_reverse() {
         assert_eq!(bit_reverse(0b000, 3), 0b000);
         assert_eq!(bit_reverse(0b001, 3), 0b100);
     }
-    
+
     #[test]
     fn test_mod_inverse() {
         let inv = mod_inverse(3, M31_P);
         assert_eq!(m31_mul(3, inv), 1);
     }
-    
+
     #[cfg(target_os = "macos")]
     #[test]
     fn test_metal_backend_creation() {
         let backend = MetalBackend::new();
         assert!(backend.is_ok());
     }
-    
+
     #[cfg(target_os = "macos")]
     #[test]
     fn test_batch_evaluate() {
         let backend = MetalBackend::new().unwrap();
-        
+
         let coeffs = vec![1, 2, 3];
         let points = vec![0, 1, 2];
         let mut results = vec![0u32; 3];
-        
-        backend.batch_evaluate(&coeffs, &points, &mut results).unwrap();
-        
-        assert_eq!(results[0], 1);  // 1 + 0 + 0
-        assert_eq!(results[1], 6);  // 1 + 2 + 3
+
+        backend
+            .batch_evaluate(&coeffs, &points, &mut results)
+            .unwrap();
+
+        assert_eq!(results[0], 1); // 1 + 0 + 0
+        assert_eq!(results[1], 6); // 1 + 2 + 3
         assert_eq!(results[2], 17); // 1 + 4 + 12
     }
 }

@@ -29,9 +29,9 @@
 //! - i² = -1
 //! - u² = 2 + i
 
+use crate::field::M31;
 use core::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use serde::{Deserialize, Serialize};
-use crate::field::M31;
 
 // ============================================================================
 // CM31: Complex Extension M31[i]/(i² + 1)
@@ -50,13 +50,22 @@ pub struct CM31 {
 
 impl CM31 {
     /// The additive identity.
-    pub const ZERO: Self = Self { a: M31::ZERO, b: M31::ZERO };
+    pub const ZERO: Self = Self {
+        a: M31::ZERO,
+        b: M31::ZERO,
+    };
 
     /// The multiplicative identity.
-    pub const ONE: Self = Self { a: M31::ONE, b: M31::ZERO };
+    pub const ONE: Self = Self {
+        a: M31::ONE,
+        b: M31::ZERO,
+    };
 
     /// The imaginary unit i where i² = -1.
-    pub const I: Self = Self { a: M31::ZERO, b: M31::ONE };
+    pub const I: Self = Self {
+        a: M31::ZERO,
+        b: M31::ONE,
+    };
 
     /// Create a new CM31 element.
     #[inline]
@@ -67,7 +76,10 @@ impl CM31 {
     /// Embed an M31 element into CM31.
     #[inline]
     pub const fn from_base(val: M31) -> Self {
-        Self { a: val, b: M31::ZERO }
+        Self {
+            a: val,
+            b: M31::ZERO,
+        }
     }
 
     /// Check if this is a real element (b = 0).
@@ -85,7 +97,10 @@ impl CM31 {
     /// Complex conjugate: conj(a + bi) = a - bi.
     #[inline]
     pub fn conjugate(self) -> Self {
-        Self { a: self.a, b: -self.b }
+        Self {
+            a: self.a,
+            b: -self.b,
+        }
     }
 
     /// Norm: N(z) = z * conj(z) = a² + b² (result is in M31).
@@ -125,26 +140,36 @@ impl Add for CM31 {
     type Output = Self;
     #[inline]
     fn add(self, rhs: Self) -> Self {
-        Self { a: self.a + rhs.a, b: self.b + rhs.b }
+        Self {
+            a: self.a + rhs.a,
+            b: self.b + rhs.b,
+        }
     }
 }
 
 impl AddAssign for CM31 {
     #[inline]
-    fn add_assign(&mut self, rhs: Self) { *self = *self + rhs; }
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
 }
 
 impl Sub for CM31 {
     type Output = Self;
     #[inline]
     fn sub(self, rhs: Self) -> Self {
-        Self { a: self.a - rhs.a, b: self.b - rhs.b }
+        Self {
+            a: self.a - rhs.a,
+            b: self.b - rhs.b,
+        }
     }
 }
 
 impl SubAssign for CM31 {
     #[inline]
-    fn sub_assign(&mut self, rhs: Self) { *self = *self - rhs; }
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
 }
 
 impl Mul for CM31 {
@@ -161,20 +186,27 @@ impl Mul for CM31 {
 
 impl MulAssign for CM31 {
     #[inline]
-    fn mul_assign(&mut self, rhs: Self) { *self = *self * rhs; }
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
+    }
 }
 
 impl Neg for CM31 {
     type Output = Self;
     #[inline]
     fn neg(self) -> Self {
-        Self { a: -self.a, b: -self.b }
+        Self {
+            a: -self.a,
+            b: -self.b,
+        }
     }
 }
 
 impl From<M31> for CM31 {
     #[inline]
-    fn from(val: M31) -> Self { Self::from_base(val) }
+    fn from(val: M31) -> Self {
+        Self::from_base(val)
+    }
 }
 
 // ============================================================================
@@ -182,7 +214,10 @@ impl From<M31> for CM31 {
 // ============================================================================
 
 /// The non-residue in CM31 used to define the extension: u² = 2 + i.
-pub const U_SQUARED: CM31 = CM31 { a: M31(2), b: M31(1) };
+pub const U_SQUARED: CM31 = CM31 {
+    a: M31(2),
+    b: M31(1),
+};
 
 /// An element of QM31 = CM31[u]/(u² - (2+i)).
 ///
@@ -201,14 +236,18 @@ pub struct QM31 {
 impl QM31 {
     /// The additive identity.
     pub const ZERO: Self = Self {
-        c0: M31::ZERO, c1: M31::ZERO,
-        c2: M31::ZERO, c3: M31::ZERO,
+        c0: M31::ZERO,
+        c1: M31::ZERO,
+        c2: M31::ZERO,
+        c3: M31::ZERO,
     };
 
     /// The multiplicative identity.
     pub const ONE: Self = Self {
-        c0: M31::ONE, c1: M31::ZERO,
-        c2: M31::ZERO, c3: M31::ZERO,
+        c0: M31::ONE,
+        c1: M31::ZERO,
+        c2: M31::ZERO,
+        c3: M31::ZERO,
     };
 
     /// Create from four M31 coefficients: a + bi + cu + diu.
@@ -220,34 +259,52 @@ impl QM31 {
     /// Create from two CM31 elements: z₀ + z₁u.
     #[inline]
     pub const fn from_cm31(z0: CM31, z1: CM31) -> Self {
-        Self { c0: z0.a, c1: z0.b, c2: z1.a, c3: z1.b }
+        Self {
+            c0: z0.a,
+            c1: z0.b,
+            c2: z1.a,
+            c3: z1.b,
+        }
     }
 
     /// Get the z₀ component (constant part).
     #[inline]
     pub const fn z0(&self) -> CM31 {
-        CM31 { a: self.c0, b: self.c1 }
+        CM31 {
+            a: self.c0,
+            b: self.c1,
+        }
     }
 
     /// Get the z₁ component (coefficient of u).
     #[inline]
     pub const fn z1(&self) -> CM31 {
-        CM31 { a: self.c2, b: self.c3 }
+        CM31 {
+            a: self.c2,
+            b: self.c3,
+        }
     }
 
     /// Embed an M31 element into QM31.
     #[inline]
     pub const fn from_base(val: M31) -> Self {
         Self {
-            c0: val, c1: M31::ZERO,
-            c2: M31::ZERO, c3: M31::ZERO,
+            c0: val,
+            c1: M31::ZERO,
+            c2: M31::ZERO,
+            c3: M31::ZERO,
         }
     }
 
     /// Embed a CM31 element into QM31.
     #[inline]
     pub const fn from_cm31_base(val: CM31) -> Self {
-        Self { c0: val.a, c1: val.b, c2: M31::ZERO, c3: M31::ZERO }
+        Self {
+            c0: val.a,
+            c1: val.b,
+            c2: M31::ZERO,
+            c3: M31::ZERO,
+        }
     }
 
     /// Check if this element is in the base field M31.
@@ -272,8 +329,10 @@ impl QM31 {
     #[inline]
     pub fn conjugate(self) -> Self {
         Self {
-            c0: self.c0, c1: self.c1,
-            c2: -self.c2, c3: -self.c3,
+            c0: self.c0,
+            c1: self.c1,
+            c2: -self.c2,
+            c3: -self.c3,
         }
     }
 
@@ -344,19 +403,27 @@ impl QM31 {
 
     /// Get the c0 coefficient.
     #[inline]
-    pub const fn c0(&self) -> M31 { self.c0 }
+    pub const fn c0(&self) -> M31 {
+        self.c0
+    }
 
     /// Get the c1 coefficient.
     #[inline]
-    pub const fn c1(&self) -> M31 { self.c1 }
+    pub const fn c1(&self) -> M31 {
+        self.c1
+    }
 
     /// Get the c2 coefficient.
     #[inline]
-    pub const fn c2(&self) -> M31 { self.c2 }
+    pub const fn c2(&self) -> M31 {
+        self.c2
+    }
 
     /// Get the c3 coefficient.
     #[inline]
-    pub const fn c3(&self) -> M31 { self.c3 }
+    pub const fn c3(&self) -> M31 {
+        self.c3
+    }
 }
 
 // ============================================================================
@@ -379,7 +446,9 @@ impl Add for QM31 {
 
 impl AddAssign for QM31 {
     #[inline]
-    fn add_assign(&mut self, rhs: Self) { *self = *self + rhs; }
+    fn add_assign(&mut self, rhs: Self) {
+        *self = *self + rhs;
+    }
 }
 
 impl Sub for QM31 {
@@ -398,7 +467,9 @@ impl Sub for QM31 {
 
 impl SubAssign for QM31 {
     #[inline]
-    fn sub_assign(&mut self, rhs: Self) { *self = *self - rhs; }
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
 }
 
 impl Mul for QM31 {
@@ -426,7 +497,9 @@ impl Mul for QM31 {
 
 impl MulAssign for QM31 {
     #[inline]
-    fn mul_assign(&mut self, rhs: Self) { *self = *self * rhs; }
+    fn mul_assign(&mut self, rhs: Self) {
+        *self = *self * rhs;
+    }
 }
 
 impl Neg for QM31 {
@@ -454,17 +527,23 @@ impl Div for QM31 {
 
 impl DivAssign for QM31 {
     #[inline]
-    fn div_assign(&mut self, rhs: Self) { *self = *self / rhs; }
+    fn div_assign(&mut self, rhs: Self) {
+        *self = *self / rhs;
+    }
 }
 
 impl From<M31> for QM31 {
     #[inline]
-    fn from(val: M31) -> Self { Self::from_base(val) }
+    fn from(val: M31) -> Self {
+        Self::from_base(val)
+    }
 }
 
 impl From<CM31> for QM31 {
     #[inline]
-    fn from(val: CM31) -> Self { Self::from_cm31_base(val) }
+    fn from(val: CM31) -> Self {
+        Self::from_cm31_base(val)
+    }
 }
 
 // ============================================================================
@@ -485,7 +564,11 @@ impl core::fmt::Display for CM31 {
 
 impl core::fmt::Display for QM31 {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        write!(f, "({} + {}i) + ({} + {}i)u", self.c0, self.c1, self.c2, self.c3)
+        write!(
+            f,
+            "({} + {}i) + ({} + {}i)u",
+            self.c0, self.c1, self.c2, self.c3
+        )
     }
 }
 
@@ -573,7 +656,12 @@ mod tests {
 
     #[test]
     fn test_qm31_mul_identity() {
-        let a = QM31::new(M31::new(123), M31::new(456), M31::new(789), M31::new(101112));
+        let a = QM31::new(
+            M31::new(123),
+            M31::new(456),
+            M31::new(789),
+            M31::new(101112),
+        );
         assert_eq!(a * QM31::ONE, a);
         assert_eq!(QM31::ONE * a, a);
     }
