@@ -12,6 +12,7 @@ members = [
     "crates/tests",
     "crates/cli", 
     "crates/zkvm",
+    "crates/zksync-os",
 ]
 
 [workspace.package]
@@ -31,6 +32,7 @@ zp1-prover = { path = "crates/prover" }
 zp1-verifier = { path = "crates/verifier" }
 zp1-delegation = { path = "crates/delegation" }
 zp1-ethereum = { path = "crates/ethereum" }
+zp1-zksync-os = { path = "crates/zksync-os" }
 
 # External dependencies
 rand = "0.8"
@@ -48,3 +50,10 @@ p3-field = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
 p3-mersenne-31 = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
 p3-dft = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
 p3-matrix = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-uni-stark = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-fri = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-challenger = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-poseidon2 = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-merkle-tree = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-commit = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }
+p3-air = { git = "https://github.com/Plonky3/Plonky3", branch = "main" }

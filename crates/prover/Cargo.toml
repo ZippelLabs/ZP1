@@ -21,6 +21,19 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 bytemuck = { workspace = true }
 thiserror = { workspace = true }
+rand = "0.9.2"
+
+# Plonky3
+p3-field = { workspace = true }
+p3-mersenne-31 = { workspace = true }
+p3-uni-stark = { workspace = true }
+p3-fri = { workspace = true }
+p3-challenger = { workspace = true }
+p3-poseidon2 = { workspace = true }
+p3-merkle-tree = { workspace = true }
+p3-commit = { workspace = true }
+p3-air = { workspace = true }
+p3-matrix = { workspace = true }
 
 # Optional Metal GPU support (macOS only)
 metal = { version = "0.28", optional = true }
@@ -34,4 +47,8 @@ criterion = "0.5"
 
 [[bench]]
 name = "prover_bench"
+harness = false
+
+[[bench]]
+name = "proof_size"
 harness = false
