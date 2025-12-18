@@ -2064,7 +2064,7 @@ mod tests {
         
         // Set bits for rs1 (high 16 bits)
         for i in 0..31 {
-            let val = if i >= 16 && i < 32 { (0x1234 >> (i - 16)) & 1 } else { 0 };
+            let val = if i >= 16 && i < 31 { (0x1234 >> (i - 16)) & 1 } else { 0 };
             row.rs1_bits[i] = if val != 0 { M31::ONE } else { M31::ZERO };
         }
         row.rs1_bits[31] = M31::ZERO;
@@ -2080,7 +2080,7 @@ mod tests {
         for i in 0..31 {
             let val = if i < 16 {
                 (0x5678 >> i) & 1
-            } else if i < 32 {
+            } else if i < 31 {
                 (0x1234 >> (i - 16)) & 1
             } else {
                 0
