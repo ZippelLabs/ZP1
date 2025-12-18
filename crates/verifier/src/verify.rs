@@ -254,7 +254,7 @@ impl Verifier {
     }
 
     /// Verify a STARK proof.
-    /// 
+    ///
     /// # Arguments
     /// * `proof` - The STARK proof to verify
     /// * `public_inputs` - Public inputs that the proof is bound to
@@ -287,14 +287,14 @@ impl Verifier {
         // Step 4: Get DEEP/OODS sampling point
         let oods_point = channel.squeeze_extension_challenge();
 
-    // Step 5: Absorb OOD values into transcript (must match prover exactly)
-    // CRITICAL: Prover only absorbs trace_at_z and composition_at_z, not trace_at_z_next
-    for v in &proof.ood_values.trace_at_z {
-        channel.absorb_felt(*v);
-    }
-    // Note: trace_at_z_next is NOT absorbed to match prover transcript
-    channel.absorb_felt(proof.ood_values.composition_at_z);
-        
+        // Step 5: Absorb OOD values into transcript (must match prover exactly)
+        // CRITICAL: Prover only absorbs trace_at_z and composition_at_z, not trace_at_z_next
+        for v in &proof.ood_values.trace_at_z {
+            channel.absorb_felt(*v);
+        }
+        // Note: trace_at_z_next is NOT absorbed to match prover transcript
+        channel.absorb_felt(proof.ood_values.composition_at_z);
+
         // Generate DEEP combination alphas (for linear combination of quotients)
         // Need one alpha per trace column + one for composition
         let num_deep_terms = proof.ood_values.trace_at_z.len() + 1;
@@ -310,10 +310,8 @@ impl Verifier {
         }
 
         // Step 7: Get query indices (must match prover's)
-        let query_indices = channel.squeeze_query_indices(
-            self.config.num_queries,
-            self.config.lde_domain_size(),
-        );
+        let query_indices =
+            channel.squeeze_query_indices(self.config.num_queries, self.config.lde_domain_size());
 
         // Step 8: Verify query count
         if proof.query_proofs.len() != self.config.num_queries {
@@ -339,34 +337,36 @@ impl Verifier {
             // Verify trace Merkle proof (single-leaf commitment per row)
             if query_proof.trace_values.len() != trace_width {
                 return Err(VerifyError::ConstraintError {
-                    constraint: format!("Trace width mismatch: expected {}, got {}", trace_width, query_proof.trace_values.len()),
+                    constraint: format!(
+                        "Trace width mismatch: expected {}, got {}",
+                        trace_width,
+                        query_proof.trace_values.len()
+                    ),
                 });
             }
 
             let trace_value = query_proof.trace_values[0];
-            if !query_proof.trace_proof.verify(&proof.trace_commitment, trace_value) {
+            if !query_proof
+                .trace_proof
+                .verify(&proof.trace_commitment, trace_value)
+            {
                 return Err(VerifyError::MerkleError {
                     index: query_proof.index,
                 });
             }
 
             // Verify composition Merkle proof
-            if !query_proof.composition_proof.verify(
-                &proof.composition_commitment,
-                query_proof.composition_value,
-            ) {
+            if !query_proof
+                .composition_proof
+                .verify(&proof.composition_commitment, query_proof.composition_value)
+            {
                 return Err(VerifyError::MerkleError {
                     index: query_proof.index,
                 });
             }
 
             // Verify DEEP quotient (ensures trace/composition values are consistent with OOD samples)
-            self.verify_deep_quotient(
-                query_proof,
-                oods_point,
-                &proof.ood_values,
-                &deep_alphas,
-            )?;
+            self.verify_deep_quotient(query_proof, oods_point, &proof.ood_values, &deep_alphas)?;
 
             // Verify constraint consistency placeholder
             self.verify_constraint_consistency(query_proof, &oods_point)?;
@@ -443,22 +443,22 @@ impl Verifier {
         // For simplicity, use query.index as M31 (real impl would use circle domain point)
         let domain_point_m31 = M31::new(query.index as u32);
         let domain_point = QM31::from(domain_point_m31);
-        
+
         // Compute denominator: X - z
         let denom = domain_point - oods_point;
-        
+
         // Check for division by zero (would indicate z is in LDE domain, which breaks soundness)
         if denom == QM31::ZERO {
             return Err(VerifyError::ConstraintError {
                 constraint: "OODS point collides with query point (denominator is zero)".into(),
             });
         }
-        
+
         let denom_inv = denom.inv();
-        
+
         // Compute expected DEEP quotient: Σ α_i · (f_i(X) - f_i(z)) / (X - z)
         let mut expected_deep = QM31::ZERO;
-        
+
         // Trace columns contribution
         for (col_idx, &trace_val_at_x) in query.trace_values.iter().enumerate() {
             if col_idx >= ood_values.trace_at_z.len() {
@@ -470,7 +470,7 @@ impl Verifier {
                     ),
                 });
             }
-            
+
             if col_idx >= deep_alphas.len() {
                 return Err(VerifyError::InvalidProof {
                     reason: format!(
@@ -480,17 +480,17 @@ impl Verifier {
                     ),
                 });
             }
-            
+
             let trace_val_at_z = ood_values.trace_at_z[col_idx];
-            
+
             // Numerator: f_i(X) - f_i(z)
             let numerator = QM31::from(trace_val_at_x) - QM31::from(trace_val_at_z);
-            
+
             // Contribution: α_i · numerator / (X - z)
             let contribution = QM31::from(deep_alphas[col_idx]) * numerator * denom_inv;
             expected_deep = expected_deep + contribution;
         }
-        
+
         // Composition polynomial contribution
         let comp_alpha_idx = query.trace_values.len();
         if comp_alpha_idx >= deep_alphas.len() {
@@ -502,35 +502,29 @@ impl Verifier {
                 ),
             });
         }
-        
-        let comp_numerator = QM31::from(query.composition_value) 
-                           - QM31::from(ood_values.composition_at_z);
-        let comp_contribution = QM31::from(deep_alphas[comp_alpha_idx]) 
-                              * comp_numerator * denom_inv;
+
+        let comp_numerator =
+            QM31::from(query.composition_value) - QM31::from(ood_values.composition_at_z);
+        let comp_contribution =
+            QM31::from(deep_alphas[comp_alpha_idx]) * comp_numerator * denom_inv;
         expected_deep = expected_deep + comp_contribution;
-        
+
         // Convert to M31 for comparison (taking real part of QM31)
         // Note: In a complete implementation, the DEEP quotient might be QM31,
         // but current proof structure stores it as M31
         let expected_deep_m31 = expected_deep.c0;
-        
+
         // Compare with claimed FRI value
         // Allow small numerical differences due to field arithmetic
         if expected_deep_m31 != query.deep_quotient_value {
-            return Err(VerifyError::DeepQuotientMismatch {
-                index: query.index,
-            });
+            return Err(VerifyError::DeepQuotientMismatch { index: query.index });
         }
-        
+
         Ok(())
     }
 
     /// Verify the FRI proof.
-    fn verify_fri(
-        &self,
-        fri_proof: &FriProof,
-        alphas: &[M31],
-    ) -> VerifyResult<()> {
+    fn verify_fri(&self, fri_proof: &FriProof, alphas: &[M31]) -> VerifyResult<()> {
         // Verify each query through the FRI layers
         for (query_idx, fri_query) in fri_proof.query_proofs.iter().enumerate() {
             self.verify_fri_query(fri_proof, fri_query, alphas, query_idx)?;
@@ -538,7 +532,7 @@ impl Verifier {
 
         // Verify final polynomial is low-degree
         // (In a complete implementation, would evaluate final_poly at random points)
-        
+
         Ok(())
     }
 
@@ -590,10 +584,15 @@ impl Verifier {
             }
 
             // Compute folded value for next layer (twin point folding)
-            let alpha = alphas.get(layer_idx).copied().ok_or_else(|| VerifyError::FriStructure {
-                reason: "Missing FRI alpha".into(),
-            })?;
-            let folded = fri_utils::compute_fold(layer_proof.value, layer_proof.sibling_value, alpha);
+            let alpha =
+                alphas
+                    .get(layer_idx)
+                    .copied()
+                    .ok_or_else(|| VerifyError::FriStructure {
+                        reason: "Missing FRI alpha".into(),
+                    })?;
+            let folded =
+                fri_utils::compute_fold(layer_proof.value, layer_proof.sibling_value, alpha);
             expected_next = Some(folded);
             current_index /= 2;
         }
@@ -601,7 +600,9 @@ impl Verifier {
         // Final polynomial check
         if let Some(expected) = expected_next {
             if fri_proof.final_poly.is_empty() {
-                return Err(VerifyError::FriStructure { reason: "Empty final polynomial".into() });
+                return Err(VerifyError::FriStructure {
+                    reason: "Empty final polynomial".into(),
+                });
             }
             let final_idx = current_index % fri_proof.final_poly.len();
             let final_val = fri_proof.final_poly[final_idx];
@@ -639,7 +640,7 @@ pub mod fri_utils {
         if coeffs.is_empty() {
             return M31::ZERO;
         }
-        
+
         let mut result = coeffs[coeffs.len() - 1];
         for i in (0..coeffs.len() - 1).rev() {
             result = result * x + coeffs[i];
@@ -679,11 +680,11 @@ mod tests {
             leaf_index: 0,
             path: vec![],
         };
-        
+
         // Single leaf tree - root equals leaf hash (with domain separation)
         let leaf = M31::new(42);
         let root = hash_leaf_m31(leaf);
-        
+
         assert!(proof.verify(&root, leaf));
         assert!(!proof.verify(&root, M31::new(43)));
     }
@@ -693,7 +694,7 @@ mod tests {
         let even = M31::new(10);
         let odd = M31::new(20);
         let alpha = M31::new(3);
-        
+
         let folded = fri_utils::compute_fold(even, odd, alpha);
         // (10+20)/2 + 3*(10-20)/2 = 15 + 3*(-10)/2 = 15 - 15 = 0
         assert_eq!(folded.as_u32(), 0);
@@ -703,13 +704,13 @@ mod tests {
     fn test_evaluate_poly() {
         // p(x) = 1 + 2x + 3x^2
         let coeffs = vec![M31::new(1), M31::new(2), M31::new(3)];
-        
+
         // p(0) = 1
         assert_eq!(fri_utils::evaluate_poly(&coeffs, M31::ZERO).as_u32(), 1);
-        
+
         // p(1) = 1 + 2 + 3 = 6
         assert_eq!(fri_utils::evaluate_poly(&coeffs, M31::ONE).as_u32(), 6);
-        
+
         // p(2) = 1 + 4 + 12 = 17
         assert_eq!(fri_utils::evaluate_poly(&coeffs, M31::new(2)).as_u32(), 17);
     }

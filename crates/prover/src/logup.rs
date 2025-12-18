@@ -96,14 +96,18 @@ impl LookupTable {
         let mut index = HashMap::with_capacity(entries.len());
         let mut values = Vec::with_capacity(entries.len());
         let mut multiplicities = Vec::with_capacity(entries.len());
-        
+
         for (i, (v, m)) in entries.into_iter().enumerate() {
             index.insert(v.as_u32(), i);
             values.push(v);
             multiplicities.push(m);
         }
-        
-        Self { values, multiplicities, index }
+
+        Self {
+            values,
+            multiplicities,
+            index,
+        }
     }
 
     /// Record a lookup of value v, incrementing its multiplicity.
@@ -206,12 +210,12 @@ impl LogUpAccumulator {
     pub fn add(&mut self, v: M31) {
         let v_ext = QM31::from_base(v);
         let diff = self.alpha - v_ext;
-        
+
         // Handle case where v = α (shouldn't happen with good challenges)
         if diff == QM31::ZERO {
             panic!("LogUp: lookup value equals challenge");
         }
-        
+
         let inv = diff.inv();
         let prev = *self.running_sum.last().unwrap();
         self.running_sum.push(prev + inv);
@@ -227,18 +231,18 @@ impl LogUpAccumulator {
             self.terms.push(QM31::ZERO);
             return;
         }
-        
+
         let v_ext = QM31::from_base(v);
         let diff = self.alpha - v_ext;
-        
+
         if diff == QM31::ZERO {
             panic!("LogUp: table value equals challenge");
         }
-        
+
         let inv = diff.inv();
         let mult = QM31::from_base(M31::new(multiplicity));
         let term = mult * inv;
-        
+
         let prev = *self.running_sum.last().unwrap();
         self.running_sum.push(prev - term);
         self.terms.push(term);
@@ -387,12 +391,12 @@ impl MultiColumnLogUp {
     pub fn combine(&self, values: &[M31]) -> QM31 {
         let mut result = QM31::ZERO;
         let mut beta_power = QM31::ONE;
-        
+
         for &v in values {
             result = result + QM31::from_base(v) * beta_power;
             beta_power = beta_power * self.beta;
         }
-        
+
         result
     }
 
@@ -585,7 +589,12 @@ pub struct MemoryOp {
 impl MemoryOp {
     /// Create a new memory operation.
     pub fn new(addr: M31, value: M31, timestamp: u32, is_write: bool) -> Self {
-        Self { addr, value, timestamp, is_write }
+        Self {
+            addr,
+            value,
+            timestamp,
+            is_write,
+        }
     }
 
     /// Create a read operation.
@@ -613,7 +622,9 @@ pub struct MemoryConsistency {
 impl MemoryConsistency {
     /// Create a new memory consistency checker.
     pub fn new() -> Self {
-        Self { operations: Vec::new() }
+        Self {
+            operations: Vec::new(),
+        }
     }
 
     /// Add a memory operation.
@@ -649,11 +660,9 @@ impl MemoryConsistency {
 
         // Sort by (address, timestamp)
         let mut sorted = self.operations.clone();
-        sorted.sort_by(|a, b| {
-            match a.addr.as_u32().cmp(&b.addr.as_u32()) {
-                std::cmp::Ordering::Equal => a.timestamp.cmp(&b.timestamp),
-                ord => ord,
-            }
+        sorted.sort_by(|a, b| match a.addr.as_u32().cmp(&b.addr.as_u32()) {
+            std::cmp::Ordering::Equal => a.timestamp.cmp(&b.timestamp),
+            ord => ord,
         });
 
         // Check consistency: for each address, reads must match preceding writes
@@ -685,14 +694,17 @@ impl MemoryConsistency {
 
         // Generate LogUp proof using multi-column approach
         let mc_logup = MultiColumnLogUp::new(alpha, beta);
-        
+
         // Original order tuples (addr, value, timestamp)
-        let original_tuples: Vec<Vec<M31>> = self.operations.iter()
+        let original_tuples: Vec<Vec<M31>> = self
+            .operations
+            .iter()
             .map(|op| vec![op.addr, op.value, M31::new(op.timestamp)])
             .collect();
 
         // Sorted order tuples
-        let sorted_tuples: Vec<Vec<M31>> = sorted.iter()
+        let sorted_tuples: Vec<Vec<M31>> = sorted
+            .iter()
             .map(|op| vec![op.addr, op.value, M31::new(op.timestamp)])
             .collect();
 
@@ -735,10 +747,8 @@ mod tests {
 
     #[test]
     fn test_lookup_table_basic() {
-        let table = LookupTable::new(vec![
-            M31::new(10), M31::new(20), M31::new(30)
-        ]);
-        
+        let table = LookupTable::new(vec![M31::new(10), M31::new(20), M31::new(30)]);
+
         assert_eq!(table.len(), 3);
         assert!(!table.is_empty());
         assert!(table.contains(M31::new(10)));
@@ -747,9 +757,7 @@ mod tests {
 
     #[test]
     fn test_lookup_table_lookup() {
-        let mut table = LookupTable::new(vec![
-            M31::new(0), M31::new(1), M31::new(2), M31::new(3)
-        ]);
+        let mut table = LookupTable::new(vec![M31::new(0), M31::new(1), M31::new(2), M31::new(3)]);
 
         // Lookup existing values
         assert_eq!(table.lookup(M31::new(1)), Some(1));
@@ -769,7 +777,7 @@ mod tests {
     fn test_lookup_table_range() {
         let table = LookupTable::range_table(4);
         assert_eq!(table.len(), 16);
-        
+
         for i in 0..16 {
             assert!(table.contains(M31::new(i)));
         }
@@ -822,9 +830,7 @@ mod tests {
         let prover = LogUpProver::new(alpha);
 
         // Create table [0, 1, 2, 3]
-        let mut table = LookupTable::new(vec![
-            M31::new(0), M31::new(1), M31::new(2), M31::new(3)
-        ]);
+        let mut table = LookupTable::new(vec![M31::new(0), M31::new(1), M31::new(2), M31::new(3)]);
 
         // Lookup values that are in the table
         let lookups = vec![M31::new(1), M31::new(2), M31::new(1)];
@@ -846,9 +852,7 @@ mod tests {
         let alpha = test_alpha();
         let prover = LogUpProver::new(alpha);
 
-        let mut table = LookupTable::new(vec![
-            M31::new(0), M31::new(1), M31::new(2)
-        ]);
+        let mut table = LookupTable::new(vec![M31::new(0), M31::new(1), M31::new(2)]);
 
         // Lookup value NOT in table (don't record it)
         let lookups = vec![M31::new(1), M31::new(99)]; // 99 not in table
@@ -904,7 +908,7 @@ mod tests {
     #[test]
     fn test_range_check_proof() {
         let mut rc = RangeCheck::new(4); // [0, 16)
-        
+
         let values = vec![M31::new(1), M31::new(5), M31::new(1), M31::new(15)];
         assert!(rc.check_all(&values));
 

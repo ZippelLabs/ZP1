@@ -116,7 +116,7 @@ impl MerkleTree {
         // Pad to power of two
         let n = leaves.len().next_power_of_two();
         let height = n.trailing_zeros() as usize;
-        
+
         while leaves.len() < n {
             // Pad with zero hashes (represents empty leaves)
             leaves.push([0u8; 32]);
@@ -125,18 +125,18 @@ impl MerkleTree {
         // Build tree bottom-up
         // nodes[0] = root, nodes[1..3] = level 1, nodes[3..7] = level 2, etc.
         let mut nodes = vec![[0u8; 32]; n - 1];
-        
+
         // Start with leaves as the current layer
         let mut current_layer = leaves.clone();
-        
+
         // Build each level from bottom to top
         // Level h-1 (just above leaves) to level 0 (root)
         for level in (0..height).rev() {
             let level_start = (1 << level) - 1; // Index where this level starts in nodes[]
-            let level_size = 1 << level;        // Number of nodes at this level
-            
+            let level_size = 1 << level; // Number of nodes at this level
+
             let mut next_layer = Vec::with_capacity(level_size);
-            
+
             for i in 0..level_size {
                 let left = &current_layer[2 * i];
                 let right = &current_layer[2 * i + 1];
@@ -144,7 +144,7 @@ impl MerkleTree {
                 nodes[level_start + i] = parent;
                 next_layer.push(parent);
             }
-            
+
             current_layer = next_layer;
         }
 
@@ -172,16 +172,16 @@ impl MerkleTree {
     /// sibling is on the left or right.
     pub fn prove(&self, index: usize) -> MerkleProof {
         assert!(index < self.leaves.len(), "Index out of bounds");
-        
+
         let mut path = Vec::with_capacity(self.height);
         let mut idx = index;
-        
+
         // Level h-1 (just above leaves): get sibling from leaves
         // Level h-2 to 0: get sibling from nodes
-        
+
         for level in (0..self.height).rev() {
             let sibling_idx = idx ^ 1; // XOR to get sibling
-            
+
             if level == self.height - 1 {
                 // Bottom level: sibling is a leaf
                 path.push(self.leaves[sibling_idx]);
@@ -191,10 +191,10 @@ impl MerkleTree {
                 let child_level_start = (1 << (level + 1)) - 1;
                 path.push(self.nodes[child_level_start + sibling_idx]);
             }
-            
+
             idx /= 2;
         }
-        
+
         MerkleProof {
             leaf_index: index,
             path,
@@ -202,12 +202,12 @@ impl MerkleTree {
     }
 
     /// Generate batch proofs for multiple leaves.
-    /// 
+    ///
     /// This is more efficient than generating individual proofs because
     /// common ancestors only need to be included once.
     pub fn prove_batch(&self, indices: &[usize]) -> BatchMerkleProof {
         let proofs: Vec<MerkleProof> = indices.iter().map(|&i| self.prove(i)).collect();
-        
+
         // In a real implementation, we would deduplicate common siblings
         // For now, just wrap individual proofs
         BatchMerkleProof {
@@ -303,9 +303,10 @@ impl BatchMerkleProof {
             return false;
         }
 
-        self.proofs.iter().zip(leaves.iter()).all(|(proof, &leaf)| {
-            MerkleTree::verify(root, leaf, proof)
-        })
+        self.proofs
+            .iter()
+            .zip(leaves.iter())
+            .all(|(proof, &leaf)| MerkleTree::verify(root, leaf, proof))
     }
 }
 
@@ -330,11 +331,11 @@ mod tests {
     fn test_merkle_tree_single() {
         let values = vec![M31::new(42)];
         let tree = MerkleTree::new(&values);
-        
+
         // Single leaf tree has height 0
         assert_eq!(tree.height(), 0);
         assert_eq!(tree.leaf_count(), 1);
-        
+
         let proof = tree.prove(0);
         assert!(MerkleTree::verify(&tree.root(), M31::new(42), &proof));
     }
@@ -343,16 +344,19 @@ mod tests {
     fn test_merkle_tree_two_leaves() {
         let values = vec![M31::new(1), M31::new(2)];
         let tree = MerkleTree::new(&values);
-        
+
         assert_eq!(tree.height(), 1);
         assert_eq!(tree.leaf_count(), 2);
-        
+
         // Verify both leaves
         for (i, &v) in values.iter().enumerate() {
             let proof = tree.prove(i);
             assert_eq!(proof.len(), 1);
-            assert!(MerkleTree::verify(&tree.root(), v, &proof), 
-                    "Verification failed for leaf {}", i);
+            assert!(
+                MerkleTree::verify(&tree.root(), v, &proof),
+                "Verification failed for leaf {}",
+                i
+            );
         }
     }
 
@@ -367,8 +371,11 @@ mod tests {
         for (i, &v) in values.iter().enumerate() {
             let proof = tree.prove(i);
             assert_eq!(proof.len(), 3);
-            assert!(MerkleTree::verify(&tree.root(), v, &proof),
-                    "Verification failed for leaf {}", i);
+            assert!(
+                MerkleTree::verify(&tree.root(), v, &proof),
+                "Verification failed for leaf {}",
+                i
+            );
         }
     }
 
@@ -383,8 +390,11 @@ mod tests {
 
         for (i, &v) in values.iter().enumerate() {
             let proof = tree.prove(i);
-            assert!(MerkleTree::verify(&tree.root(), v, &proof),
-                    "Verification failed for leaf {}", i);
+            assert!(
+                MerkleTree::verify(&tree.root(), v, &proof),
+                "Verification failed for leaf {}",
+                i
+            );
         }
     }
 
@@ -402,10 +412,10 @@ mod tests {
     fn test_merkle_tree_wrong_index() {
         let values: Vec<M31> = (0..4).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         // Get proof for index 0
         let mut proof = tree.prove(0);
-        
+
         // Modify to claim it's index 1 - should fail
         proof.leaf_index = 1;
         assert!(!MerkleTree::verify(&tree.root(), values[0], &proof));
@@ -415,14 +425,14 @@ mod tests {
     fn test_merkle_tree_tampered_proof() {
         let values: Vec<M31> = (0..4).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         let mut proof = tree.prove(0);
-        
+
         // Tamper with a sibling hash
         if !proof.path.is_empty() {
             proof.path[0][0] ^= 0xFF;
         }
-        
+
         assert!(!MerkleTree::verify(&tree.root(), values[0], &proof));
     }
 
@@ -430,10 +440,10 @@ mod tests {
     fn test_merkle_tree_different_roots() {
         let values1: Vec<M31> = (0..4).map(|i| M31::new(i)).collect();
         let values2: Vec<M31> = (0..4).map(|i| M31::new(i + 100)).collect();
-        
+
         let tree1 = MerkleTree::new(&values1);
         let tree2 = MerkleTree::new(&values2);
-        
+
         // Different values should have different roots
         assert_ne!(tree1.root(), tree2.root());
     }
@@ -442,13 +452,16 @@ mod tests {
     fn test_merkle_tree_bytes() {
         let data: Vec<&[u8]> = vec![b"hello", b"world", b"foo", b"bar"];
         let tree = MerkleTree::from_bytes(&data);
-        
+
         assert_eq!(tree.height(), 2);
-        
+
         for (i, &d) in data.iter().enumerate() {
             let proof = tree.prove(i);
-            assert!(MerkleTree::verify_bytes(&tree.root(), d, &proof),
-                    "Verification failed for leaf {}", i);
+            assert!(
+                MerkleTree::verify_bytes(&tree.root(), d, &proof),
+                "Verification failed for leaf {}",
+                i
+            );
         }
     }
 
@@ -456,10 +469,10 @@ mod tests {
     fn test_batch_proof() {
         let values: Vec<M31> = (0..8).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         let indices = vec![1, 3, 5];
         let batch_proof = tree.prove_batch(&indices);
-        
+
         let queried_values: Vec<M31> = indices.iter().map(|&i| values[i]).collect();
         assert!(batch_proof.verify_all(&tree.root(), &queried_values));
     }
@@ -470,14 +483,14 @@ mod tests {
         // A leaf with value that matches an internal node hash shouldn't verify
         let values: Vec<M31> = (0..4).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         // Get a leaf hash
         let leaf_hash = tree.get_leaf(0).unwrap();
-        
+
         // The root uses INTERNAL_PREFIX, leaf uses LEAF_PREFIX
         // They should be computed differently
         let root = tree.root();
-        
+
         // A crafted "leaf" that equals an internal node shouldn't verify
         // This would be a second preimage attack without domain separation
         assert_ne!(leaf_hash, root);
@@ -487,7 +500,7 @@ mod tests {
     fn test_compute_root() {
         let values: Vec<M31> = (0..8).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         // compute_root should give same result as tree.root()
         assert_eq!(compute_root(&values), tree.root());
     }
@@ -497,9 +510,9 @@ mod tests {
         // Test with 256 leaves
         let values: Vec<M31> = (0..256).map(|i| M31::new(i as u32)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         assert_eq!(tree.height(), 8); // log2(256) = 8
-        
+
         // Verify a few random indices
         for &i in &[0, 127, 200, 255] {
             let proof = tree.prove(i);
@@ -512,7 +525,7 @@ mod tests {
     fn test_empty_tree() {
         let values: Vec<M31> = vec![];
         let tree = MerkleTree::new(&values);
-        
+
         // Empty tree should have a default root
         assert_eq!(tree.leaf_count(), 1); // Padded to 1
         assert_eq!(tree.height(), 0);
@@ -523,10 +536,10 @@ mod tests {
         // Verify that the same proof verifies against the same leaf multiple times
         let values: Vec<M31> = (0..4).map(|i| M31::new(i)).collect();
         let tree = MerkleTree::new(&values);
-        
+
         let proof = tree.prove(2);
         let root = tree.root();
-        
+
         // Multiple verifications should all succeed
         for _ in 0..10 {
             assert!(MerkleTree::verify(&root, values[2], &proof));

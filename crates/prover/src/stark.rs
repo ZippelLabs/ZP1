@@ -77,12 +77,12 @@
 
 use crate::{
     channel::ProverChannel,
-    commitment::{MerkleTree, MerkleProof},
+    commitment::{MerkleProof, MerkleTree},
+    fri::{FriConfig, FriProof, FriProver},
     lde::TraceLDE,
-    fri::{FriConfig, FriProver, FriProof},
 };
-use zp1_primitives::{M31, QM31, CirclePoint};
-use zp1_air::{CpuTraceRow, ConstraintEvaluator as AirConstraintEvaluator};
+use zp1_air::{ConstraintEvaluator as AirConstraintEvaluator, CpuTraceRow};
+use zp1_primitives::{CirclePoint, M31, QM31};
 
 /// Configuration for the STARK prover.
 #[derive(Clone, Debug)]
@@ -132,7 +132,7 @@ impl StarkConfig {
     pub fn lde_domain_size(&self) -> usize {
         self.trace_len() * self.blowup_factor
     }
-    
+
     /// Get log of LDE domain size.
     pub fn log_lde_domain_size(&self) -> usize {
         self.log_trace_len + self.blowup_factor.trailing_zeros() as usize
@@ -212,7 +212,7 @@ impl StarkProver {
     }
 
     /// Enable range checks for 16-bit witness values.
-    /// 
+    ///
     /// When enabled, verifies that witness columns (carry, borrow, mul_lo, etc.)
     /// are in the valid range [0, 2^16).
     pub fn enable_range_checks(&mut self) {
@@ -220,7 +220,7 @@ impl StarkProver {
     }
 
     /// Enable parallel processing for improved performance.
-    /// 
+    ///
     /// Uses rayon for parallel:
     /// - Constraint evaluation
     /// - Merkle tree construction
@@ -246,7 +246,10 @@ impl StarkProver {
         let num_cols = trace_columns.len();
         let trace_len = trace_columns[0].len();
 
-        assert!(trace_len.is_power_of_two(), "Trace length must be power of 2");
+        assert!(
+            trace_len.is_power_of_two(),
+            "Trace length must be power of 2"
+        );
         assert_eq!(trace_len, self.config.trace_len(), "Trace length mismatch");
 
         // ===== Phase 0: Bind Public Inputs =====
@@ -275,12 +278,12 @@ impl StarkProver {
             if let Err(e) = ram_prover.verify_consistency() {
                 panic!("Memory consistency check failed: {}", e);
             }
-            
+
             // Verify the permutation argument (execution order ↔ sorted order)
             if !ram_prover.verify_shuffle1() {
                 panic!("RAM permutation argument failed");
             }
-            
+
             // Note: In a complete implementation, we would:
             // 1. Get RAM columns and add them to the trace
             // 2. Add RAM constraints to the composition polynomial
@@ -292,9 +295,9 @@ impl StarkProver {
         // Verify 16-bit witness columns are in valid range [0, 2^16)
         if self.range_check_enabled && num_cols >= 77 {
             use crate::logup::RangeCheck;
-            
+
             let mut range_checker = RangeCheck::new(16); // 16-bit range [0, 65536)
-            
+
             // Column indices for 16-bit witness values (per trace column layout):
             // imm_lo (8), imm_hi (9), rd_val_lo (10), rd_val_hi (11),
             // rs1_val_lo (12), rs1_val_hi (13), rs2_val_lo (14), rs2_val_hi (15),
@@ -302,18 +305,19 @@ impl StarkProver {
             // mul_lo (67), mul_hi (68), carry (69), borrow (70),
             // quotient_lo (71), quotient_hi (72), remainder_lo (73), remainder_hi (74)
             let witness_column_indices = [
-                8, 9, 10, 11, 12, 13, 14, 15,     // Immediate and register values (16-bit limbs)
-                62, 63, 64, 65,                   // Memory address/value limbs
-                67, 68, 69, 70, 71, 72, 73, 74,  // Multiply/carry/div witnesses
+                8, 9, 10, 11, 12, 13, 14, 15, // Immediate and register values (16-bit limbs)
+                62, 63, 64, 65, // Memory address/value limbs
+                67, 68, 69, 70, 71, 72, 73, 74, // Multiply/carry/div witnesses
             ];
-            
+
             for &col_idx in &witness_column_indices {
                 if col_idx < num_cols {
                     for &value in &trace_columns[col_idx] {
                         if !range_checker.check(value) {
                             panic!(
-                                "Range check failed: column {} value {} exceeds 16-bit range", 
-                                col_idx, value.as_u32()
+                                "Range check failed: column {} value {} exceeds 16-bit range",
+                                col_idx,
+                                value.as_u32()
                             );
                         }
                     }
@@ -347,14 +351,10 @@ impl StarkProver {
         // ===== Phase 3: DEEP Sampling =====
         // Sample out-of-domain point
         let oods_point = self.channel.squeeze_qm31();
-        
+
         // Evaluate trace and composition at OOD point
-        let ood_values = self.evaluate_ood(
-            &trace_columns,
-            &composition_evals,
-            oods_point,
-        );
-        
+        let ood_values = self.evaluate_ood(&trace_columns, &composition_evals, oods_point);
+
         // Absorb OOD values
         for &v in &ood_values.trace_at_z {
             self.channel.absorb_felt(v);
@@ -363,12 +363,8 @@ impl StarkProver {
 
         // ===== Phase 4: DEEP Quotient and FRI =====
         // Build DEEP quotient polynomial
-        let deep_quotient = self.build_deep_quotient(
-            &trace_lde,
-            &composition_evals,
-            &ood_values,
-            oods_point,
-        );
+        let deep_quotient =
+            self.build_deep_quotient(&trace_lde, &composition_evals, &ood_values, oods_point);
 
         // FRI commitment
         let fri_config = FriConfig {
@@ -383,9 +379,7 @@ impl StarkProver {
 
         // ===== Phase 5: Query Phase =====
         // Note: FRI commit already squeezed query indices internally, so we use those
-        let query_indices: Vec<usize> = fri_proof.query_proofs.iter()
-            .map(|q| q.index)
-            .collect();
+        let query_indices: Vec<usize> = fri_proof.query_proofs.iter().map(|q| q.index).collect();
 
         let query_proofs = self.generate_query_proofs(
             &query_indices,
@@ -405,13 +399,13 @@ impl StarkProver {
         }
     }
     /// Build Merkle tree for trace, committing to ALL columns via interleaving.
-    /// 
+    ///
     /// Interleaves columns as: [col0[0], col1[0], ..., col0[1], col1[1], ...]
     /// This ensures all columns are bound to the commitment (critical for soundness).
     fn build_trace_merkle_tree(&self, trace_lde: &TraceLDE) -> MerkleTree {
         let domain_size = trace_lde.domain_size();
         let num_cols = trace_lde.num_columns();
-        
+
         // Interleave all columns for commitment
         let mut interleaved = Vec::with_capacity(domain_size * num_cols);
         for row in 0..domain_size {
@@ -419,10 +413,10 @@ impl StarkProver {
                 interleaved.push(trace_lde.get(col, row));
             }
         }
-        
+
         MerkleTree::new(&interleaved)
     }
-    
+
     /// Squeeze random coefficients for combining constraints.
     fn squeeze_constraint_alphas(&mut self, num_cols: usize) -> Vec<M31> {
         // Generate enough alphas for boundary + transition constraints
@@ -433,16 +427,12 @@ impl StarkProver {
     }
 
     /// Evaluate the composition polynomial at all LDE domain points.
-    /// 
+    ///
     /// The composition polynomial combines all AIR constraints:
     /// C(x) = sum_i alpha_i * C_i(x) / Z_i(x)
-    /// 
+    ///
     /// where C_i are constraint polynomials and Z_i are their zerofiers.
-    fn evaluate_composition_polynomial(
-        &self,
-        trace_lde: &TraceLDE,
-        alphas: &[M31],
-    ) -> Vec<M31> {
+    fn evaluate_composition_polynomial(&self, trace_lde: &TraceLDE, alphas: &[M31]) -> Vec<M31> {
         let domain_size = trace_lde.domain_size();
         let blowup = self.config.blowup_factor;
         let trace_len = self.config.trace_len();
@@ -454,7 +444,7 @@ impl StarkProver {
             let trace_row: Vec<M31> = (0..trace_lde.num_columns())
                 .map(|c| trace_lde.get(c, i))
                 .collect();
-            
+
             // Get values at next row (with wraparound)
             let trace_row_next: Vec<M31> = (0..trace_lde.num_columns())
                 .map(|c| trace_lde.get(c, (i + blowup) % domain_size))
@@ -467,33 +457,33 @@ impl StarkProver {
             // Z_boundary(x) vanishes at i = 0, blowup, 2*blowup, ... (original trace positions)
             let is_trace_position = i % blowup == 0;
             let is_first_row = i < blowup;
-            
+
             if is_first_row && is_trace_position {
                 // Enforce boundary constraints at first execution step:
                 // 1. PC must equal entry point
                 // 2. next_pc must equal PC + 4 (sequential start)
                 // 3. x0 register (rd=0) must be zero (rd_val_lo and rd_val_hi)
-                
+
                 let pc = trace_row[1]; // Column 1 is PC
                 let next_pc = trace_row[2]; // Column 2 is next_pc
                 let rd_val_lo = trace_row[10]; // Column 10 is rd_val_lo
                 let rd_val_hi = trace_row[11]; // Column 11 is rd_val_hi
-                
+
                 let entry_pc = M31::new(self.config.entry_point & 0x7FFFFFFF);
                 let four = M31::new(4);
-                
+
                 // Boundary constraint 1: PC = entry_point
                 if alpha_idx < alphas.len() {
                     constraint_sum += alphas[alpha_idx] * (pc - entry_pc);
                 }
                 alpha_idx += 1;
-                
+
                 // Boundary constraint 2: next_pc = pc + 4
                 if alpha_idx < alphas.len() {
                     constraint_sum += alphas[alpha_idx] * (next_pc - pc - four);
                 }
                 alpha_idx += 1;
-                
+
                 // Boundary constraint 3: x0 = 0 (both limbs)
                 // Note: This is enforced globally by x0_zero constraint,
                 // but we add it here for explicit boundary checking
@@ -501,7 +491,7 @@ impl StarkProver {
                     constraint_sum += alphas[alpha_idx] * rd_val_lo;
                 }
                 alpha_idx += 1;
-                
+
                 if alpha_idx < alphas.len() {
                     constraint_sum += alphas[alpha_idx] * rd_val_hi;
                 }
@@ -512,7 +502,7 @@ impl StarkProver {
             // Map columns to CpuTraceRow
             let row = CpuTraceRow::from_slice(&trace_row);
             let constraints = AirConstraintEvaluator::evaluate_all(&row);
-            
+
             for c in constraints {
                 if alpha_idx < alphas.len() {
                     constraint_sum += alphas[alpha_idx] * c;
@@ -522,14 +512,14 @@ impl StarkProver {
 
             // 2. Inter-row constraints (apply to non-last rows)
             let is_last_row = i >= (trace_len - 1) * blowup && i < trace_len * blowup;
-            
+
             if !is_last_row {
                 // pc' = next_pc
                 // trace_row_next[1] (pc) == trace_row[2] (next_pc)
                 let pc_next = trace_row_next[1];
                 let next_pc_curr = trace_row[2];
                 let pc_consistency = pc_next - next_pc_curr;
-                
+
                 if alpha_idx < alphas.len() {
                     constraint_sum += alphas[alpha_idx] * pc_consistency;
                 }
@@ -543,7 +533,7 @@ impl StarkProver {
     }
 
     /// Parallel version of composition polynomial evaluation.
-    /// 
+    ///
     /// Uses rayon for ~2-8x speedup on multi-core systems.
     fn evaluate_composition_polynomial_parallel(
         &self,
@@ -551,7 +541,7 @@ impl StarkProver {
         alphas: &[M31],
     ) -> Vec<M31> {
         use rayon::prelude::*;
-        
+
         let domain_size = trace_lde.domain_size();
         let blowup = self.config.blowup_factor;
         let trace_len = self.config.trace_len();
@@ -563,10 +553,8 @@ impl StarkProver {
             .into_par_iter()
             .map(|i| {
                 // Get values at current row
-                let trace_row: Vec<M31> = (0..num_columns)
-                    .map(|c| trace_lde.get(c, i))
-                    .collect();
-                
+                let trace_row: Vec<M31> = (0..num_columns).map(|c| trace_lde.get(c, i)).collect();
+
                 // Get values at next row (with wraparound)
                 let trace_row_next: Vec<M31> = (0..num_columns)
                     .map(|c| trace_lde.get(c, (i + blowup) % domain_size))
@@ -578,31 +566,31 @@ impl StarkProver {
                 // Boundary constraints
                 let is_trace_position = i % blowup == 0;
                 let is_first_row = i < blowup;
-                
+
                 if is_first_row && is_trace_position && trace_row.len() >= 12 {
                     let pc = trace_row[1];
                     let next_pc = trace_row[2];
                     let rd_val_lo = trace_row[10];
                     let rd_val_hi = trace_row[11];
-                    
+
                     let entry_pc = M31::new(entry_point & 0x7FFFFFFF);
                     let four = M31::new(4);
-                    
+
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * (pc - entry_pc);
                     }
                     alpha_idx += 1;
-                    
+
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * (next_pc - pc - four);
                     }
                     alpha_idx += 1;
-                    
+
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * rd_val_lo;
                     }
                     alpha_idx += 1;
-                    
+
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * rd_val_hi;
                     }
@@ -612,7 +600,7 @@ impl StarkProver {
                 // Intra-row constraints
                 let row = CpuTraceRow::from_slice(&trace_row);
                 let constraints = AirConstraintEvaluator::evaluate_all(&row);
-                
+
                 for c in constraints {
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * c;
@@ -622,12 +610,12 @@ impl StarkProver {
 
                 // Inter-row constraints
                 let is_last_row = i >= (trace_len - 1) * blowup && i < trace_len * blowup;
-                
+
                 if !is_last_row && trace_row.len() >= 3 && trace_row_next.len() >= 2 {
                     let pc_next = trace_row_next[1];
                     let next_pc_curr = trace_row[2];
                     let pc_consistency = pc_next - next_pc_curr;
-                    
+
                     if alpha_idx < alphas_vec.len() {
                         constraint_sum += alphas_vec[alpha_idx] * pc_consistency;
                     }
@@ -637,9 +625,9 @@ impl StarkProver {
             })
             .collect()
     }
-    
+
     /// Evaluate trace and composition at out-of-domain point.
-    /// 
+    ///
     /// Uses full QM31 arithmetic for proper security (~128 bits).
     fn evaluate_ood(
         &self,
@@ -648,30 +636,32 @@ impl StarkProver {
         z: QM31,
     ) -> OodValues {
         // Evaluate trace polynomials at z using full QM31 arithmetic
-        let trace_at_z: Vec<M31> = trace_columns.iter()
+        let trace_at_z: Vec<M31> = trace_columns
+            .iter()
             .map(|col| self.evaluate_poly_at_qm31(col, z))
             .collect();
-        
+
         // For next row: multiply z by domain generator's x-coordinate
         // In circle domain, the generator advances us to the next point
         let generator = CirclePoint::generator(self.config.log_trace_len);
         let gen_x = QM31::from(generator.x);
         let z_next = z * gen_x;
-        
-        let trace_at_z_next: Vec<M31> = trace_columns.iter()
+
+        let trace_at_z_next: Vec<M31> = trace_columns
+            .iter()
             .map(|col| self.evaluate_poly_at_qm31(col, z_next))
             .collect();
-        
+
         // Composition at z
         let composition_at_z = self.evaluate_poly_at_qm31(composition_evals, z);
-        
+
         OodValues {
             trace_at_z,
             trace_at_z_next,
             composition_at_z,
         }
     }
-    
+
     /// Evaluate polynomial at a single point (Horner's method).
     fn evaluate_poly_at_point(&self, coeffs: &[M31], x: M31) -> M31 {
         let mut result = M31::ZERO;
@@ -682,7 +672,7 @@ impl StarkProver {
     }
 
     /// Evaluate polynomial at a QM31 point using Horner's method.
-    /// 
+    ///
     /// Uses full extension field arithmetic for proper security.
     /// Returns the c0 component (projection to base field).
     fn evaluate_poly_at_qm31(&self, coeffs: &[M31], x: QM31) -> M31 {
@@ -693,11 +683,11 @@ impl StarkProver {
         // Return c0 component (projection to base field for constraint checking)
         result.c0
     }
-    
+
     /// Build the DEEP quotient polynomial.
-    /// 
+    ///
     /// Q(x) = sum_i alpha_i * (f_i(x) - f_i(z)) / (x - z)
-    /// 
+    ///
     /// This "lifts" the low-degree test to include the OOD values.
     /// Uses actual circle domain points for proper soundness.
     fn build_deep_quotient(
@@ -708,23 +698,23 @@ impl StarkProver {
         z: QM31,
     ) -> Vec<M31> {
         let domain_size = trace_lde.domain_size();
-        
+
         // Get DEEP combination alphas
         let num_terms = trace_lde.num_columns() + 1; // trace columns + composition
         let deep_alphas: Vec<M31> = (0..num_terms)
             .map(|i| M31::new((i as u32 + 1) * 7919)) // Deterministic for testing
             .collect();
-        
+
         let mut quotient = vec![M31::ZERO; domain_size];
-        
+
         for i in 0..domain_size {
             // Get ACTUAL circle domain point x-coordinate (critical for soundness!)
             let x_i = trace_lde.get_domain_x(i);
             let x_i_qm31 = QM31::from(x_i);
-            
+
             // Compute (x_i - z)^(-1) in QM31 for proper security
             let denom = x_i_qm31 - z;
-            
+
             // Handle singularity (when x_i == z, which is extremely rare)
             let denom_inv = if denom.is_zero() {
                 // Skip this point in the quotient (contributes 0)
@@ -732,26 +722,27 @@ impl StarkProver {
             } else {
                 denom.inv()
             };
-            
+
             let mut sum = QM31::ZERO;
-            
+
             // Add trace column contributions
             for (col_idx, &ood_val) in ood_values.trace_at_z.iter().enumerate() {
                 let f_x = trace_lde.get(col_idx, i);
                 let numerator = QM31::from(f_x - ood_val);
                 sum = sum + QM31::from(deep_alphas[col_idx]) * numerator * denom_inv;
             }
-            
+
             // Add composition contribution
             let comp_x = composition_evals[i];
             let comp_z = ood_values.composition_at_z;
             let comp_numerator = QM31::from(comp_x - comp_z);
-            sum = sum + QM31::from(deep_alphas[trace_lde.num_columns()]) * comp_numerator * denom_inv;
-            
+            sum =
+                sum + QM31::from(deep_alphas[trace_lde.num_columns()]) * comp_numerator * denom_inv;
+
             // Project result to base field
             quotient[i] = sum.c0;
         }
-        
+
         quotient
     }
 
@@ -766,17 +757,17 @@ impl StarkProver {
         deep_quotient: &[M31],
     ) -> Vec<QueryProof> {
         let num_cols = trace_lde.num_columns();
-        
+
         indices
             .iter()
             .map(|&idx| {
                 let trace_values = trace_lde.get_row(idx);
-                
+
                 // For interleaved commitment, prove starting index of the row
                 // Row idx contains indices [idx*num_cols, idx*num_cols + 1, ..., idx*num_cols + num_cols-1]
                 let interleaved_idx = idx * num_cols;
                 let trace_proof = trace_tree.prove(interleaved_idx);
-                
+
                 let composition_value = composition_evals[idx];
                 let composition_proof = composition_tree.prove(idx);
                 let deep_quotient_value = deep_quotient[idx];
@@ -846,32 +837,32 @@ impl StarkVerifier {
     pub fn new(config: StarkConfig) -> Self {
         Self { config }
     }
-    
+
     /// Verify a STARK proof.
     pub fn verify(&self, proof: &StarkProof) -> bool {
         let mut channel = ProverChannel::new(b"zp1-stark-v1");
-        
+
         // Absorb trace commitment
         channel.absorb(&proof.trace_commitment);
-        
+
         // Get constraint alphas (must match prover - use same count as num_cols * 2)
         let num_cols = proof.ood_values.trace_at_z.len();
         let _constraint_alphas: Vec<M31> = (0..num_cols * 2)
             .map(|_| channel.squeeze_challenge())
             .collect();
-        
+
         // Absorb composition commitment
         channel.absorb(&proof.composition_commitment);
-        
+
         // Get OOD point
         let _oods_point = channel.squeeze_qm31();
-        
+
         // Absorb OOD values
         for &v in &proof.ood_values.trace_at_z {
             channel.absorb_felt(v);
         }
         channel.absorb_felt(proof.ood_values.composition_at_z);
-        
+
         // Verify FRI proof using the same channel state as prover
         let fri_config = FriConfig {
             log_domain_size: self.config.log_lde_domain_size(),
@@ -880,7 +871,7 @@ impl StarkVerifier {
             final_degree: 8,
         };
         let _fri_prover = FriProver::new(fri_config);
-        
+
         // FRI verification follows the prover's channel flow
         // Absorb layer commitments and squeeze challenges (matches FRI.commit)
         let mut fri_challenges = Vec::with_capacity(proof.fri_proof.layer_commitments.len());
@@ -888,20 +879,18 @@ impl StarkVerifier {
             channel.absorb_commitment(commitment);
             fri_challenges.push(channel.squeeze_challenge());
         }
-        
+
         // Get query indices - squeezed after all FRI layer commitments (matches FRI.commit)
-        let query_indices = channel.squeeze_query_indices(
-            self.config.num_queries,
-            self.config.lde_domain_size(),
-        );
-        
+        let query_indices =
+            channel.squeeze_query_indices(self.config.num_queries, self.config.lde_domain_size());
+
         // Verify Merkle proofs for each query
         for (q_idx, query) in proof.query_proofs.iter().enumerate() {
             // Verify query index matches expected
             if query.index != query_indices[q_idx] {
                 return false;
             }
-            
+
             // Verify trace Merkle proof
             if !query.trace_values.is_empty() {
                 let trace_valid = MerkleTree::verify(
@@ -913,7 +902,7 @@ impl StarkVerifier {
                     return false;
                 }
             }
-            
+
             // Verify composition Merkle proof
             let comp_valid = MerkleTree::verify(
                 &proof.composition_commitment,
@@ -924,17 +913,17 @@ impl StarkVerifier {
                 return false;
             }
         }
-        
+
         // Verify FRI query proofs
         for (query_idx, fri_query) in proof.fri_proof.query_proofs.iter().enumerate() {
             if fri_query.index != query_indices[query_idx] {
                 return false;
             }
-            
+
             // Verify folding consistency
             let mut expected_value: Option<M31> = None;
             let mut current_idx = fri_query.index;
-            
+
             for (layer_idx, layer_proof) in fri_query.layer_proofs.iter().enumerate() {
                 // Check expected value from previous layer
                 if let Some(expected) = expected_value {
@@ -942,18 +931,18 @@ impl StarkVerifier {
                         return false;
                     }
                 }
-                
+
                 // Compute folded value for next layer
                 let alpha = fri_challenges[layer_idx];
                 let inv_two = M31::new(2).inv();
                 let sum = layer_proof.value + layer_proof.sibling_value;
                 let diff = layer_proof.value - layer_proof.sibling_value;
                 let folded = sum * inv_two + alpha * diff * inv_two;
-                
+
                 expected_value = Some(folded);
                 current_idx /= 2;
             }
-            
+
             // Final polynomial check
             if let Some(expected) = expected_value {
                 let final_idx = current_idx % proof.fri_proof.final_poly.len();
@@ -965,10 +954,9 @@ impl StarkVerifier {
                 }
             }
         }
-        
+
         // Basic structural checks
-        !proof.fri_proof.final_poly.is_empty() && 
-        !proof.fri_proof.layer_commitments.is_empty()
+        !proof.fri_proof.final_poly.is_empty() && !proof.fri_proof.layer_commitments.is_empty()
     }
 }
 
@@ -991,7 +979,9 @@ mod tests {
         // We need enough columns for CpuTraceRow (77 columns)
         let mut columns: Vec<Vec<M31>> = Vec::new();
         for i in 0..77 {
-            let col: Vec<M31> = (0..trace_len).map(|j| M31::new((i + j as usize) as u32)).collect();
+            let col: Vec<M31> = (0..trace_len)
+                .map(|j| M31::new((i + j as usize) as u32))
+                .collect();
             columns.push(col);
         }
 
@@ -1013,40 +1003,57 @@ mod tests {
         assert_eq!(proof.composition_commitment.len(), 32);
         assert_eq!(proof.query_proofs.len(), 3);
         assert!(!proof.ood_values.trace_at_z.is_empty());
-        
+
         // Verify structural properties
-        assert!(!proof.fri_proof.layer_commitments.is_empty(), "Should have FRI layers");
-        assert!(!proof.fri_proof.final_poly.is_empty(), "Should have final polynomial");
-        assert_eq!(proof.fri_proof.query_proofs.len(), 3, "Should have 3 FRI query proofs");
-        
+        assert!(
+            !proof.fri_proof.layer_commitments.is_empty(),
+            "Should have FRI layers"
+        );
+        assert!(
+            !proof.fri_proof.final_poly.is_empty(),
+            "Should have final polynomial"
+        );
+        assert_eq!(
+            proof.fri_proof.query_proofs.len(),
+            3,
+            "Should have 3 FRI query proofs"
+        );
+
         // Each FRI query should have layer proofs
         for fri_query in &proof.fri_proof.query_proofs {
-            assert!(!fri_query.layer_proofs.is_empty(), "FRI query should have layer proofs");
+            assert!(
+                !fri_query.layer_proofs.is_empty(),
+                "FRI query should have layer proofs"
+            );
         }
-        
+
         // Query proofs should have valid structure
         for query in &proof.query_proofs {
             assert!(query.index < 32, "Query index should be in domain");
             assert!(!query.trace_values.is_empty(), "Should have trace values");
-            assert!(!query.trace_proof.path.is_empty() || query.trace_proof.path.is_empty(), 
-                    "Trace proof should have valid structure");
+            assert!(
+                !query.trace_proof.path.is_empty() || query.trace_proof.path.is_empty(),
+                "Trace proof should have valid structure"
+            );
         }
-        
+
         // Test verifier construction (verification may fail due to folding math)
         let verifier = StarkVerifier::new(config);
         let _ = verifier.verify(&proof); // Result doesn't matter for structural test
     }
-    
+
     #[test]
     fn test_multi_column_proof() {
         let trace_len = 8;
         // We need enough columns for CpuTraceRow (77 columns)
         let mut columns: Vec<Vec<M31>> = Vec::new();
         for i in 0..77 {
-            let col: Vec<M31> = (0..trace_len).map(|j| M31::new((i * j as usize) as u32)).collect();
+            let col: Vec<M31> = (0..trace_len)
+                .map(|j| M31::new((i * j as usize) as u32))
+                .collect();
             columns.push(col);
         }
-        
+
         let config = StarkConfig {
             log_trace_len: 3,
             blowup_factor: 4,
@@ -1055,65 +1062,65 @@ mod tests {
             security_bits: 50,
             entry_point: 0x0,
         };
-        
+
         let mut prover = StarkProver::new(config.clone());
         let public_inputs = vec![]; // No public inputs for this test
         let proof = prover.prove(columns, &public_inputs);
-        
+
         assert_eq!(proof.ood_values.trace_at_z.len(), 77);
         assert_eq!(proof.query_proofs[0].trace_values.len(), 77);
     }
-    
+
     #[test]
     fn test_constraint_evaluator() {
         let evaluator = ConstraintEvaluator::new(1, 2);
-        
+
         let row = vec![M31::new(5)];
         let row_next = vec![M31::new(6)];
         let alphas = vec![M31::ONE, M31::ONE];
-        
+
         // Boundary constraint at first row
         let result = evaluator.evaluate(&row, &row_next, &alphas, true);
         // boundary = 5, transition = 6 - 5 - 1 = 0
         assert_eq!(result, M31::new(5));
-        
+
         // Non-boundary
         let result2 = evaluator.evaluate(&row, &row_next, &alphas, false);
         // Only transition = 0
         assert_eq!(result2, M31::ZERO);
     }
-    
+
     #[test]
     fn test_boundary_constraint_entry_point() {
         // Test that boundary constraints enforce correct entry_point
         let trace_len = 8;
         let entry_point = 0x1000u32;
-        
+
         // Create trace with correct entry point at first row
         let mut columns: Vec<Vec<M31>> = Vec::new();
-        
+
         // Column 0: clk
         columns.push((0..trace_len).map(|j| M31::new(j as u32)).collect());
-        
+
         // Column 1: PC (should start at entry_point)
         let mut pc_col = vec![M31::new(entry_point & 0x7FFFFFFF)];
         for j in 1..trace_len {
             pc_col.push(M31::new((entry_point + (j * 4) as u32) & 0x7FFFFFFF));
         }
         columns.push(pc_col);
-        
+
         // Column 2: next_pc (should be PC + 4 at first row)
         let mut next_pc_col = vec![M31::new((entry_point + 4) & 0x7FFFFFFF)];
         for j in 1..trace_len {
             next_pc_col.push(M31::new((entry_point + ((j + 1) * 4) as u32) & 0x7FFFFFFF));
         }
         columns.push(next_pc_col);
-        
+
         // Fill remaining columns (up to 77) with zeros
         for _ in 3..77 {
             columns.push(vec![M31::ZERO; trace_len]);
         }
-        
+
         let config = StarkConfig {
             log_trace_len: 3,
             blowup_factor: 4,
@@ -1122,64 +1129,66 @@ mod tests {
             security_bits: 50,
             entry_point,
         };
-        
+
         let mut prover = StarkProver::new(config.clone());
         let public_inputs = vec![];
-        
+
         // Should succeed with correct entry_point
         let proof = prover.prove(columns.clone(), &public_inputs);
         assert_eq!(proof.trace_commitment.len(), 32);
-        
+
         // Now test with WRONG entry point in config (should still generate proof,
         // but composition polynomial will be non-zero at boundary)
         let wrong_config = StarkConfig {
             entry_point: 0x2000u32, // Wrong entry point
             ..config
         };
-        
+
         let mut wrong_prover = StarkProver::new(wrong_config);
         let wrong_proof = wrong_prover.prove(columns, &public_inputs);
-        
+
         // Proof still generates (prover doesn't check constraints)
         // But composition polynomial at boundary will be non-zero
         // This would be caught by the verifier
         assert_eq!(wrong_proof.trace_commitment.len(), 32);
-        
+
         // The OOD composition value should be different when entry_point mismatches
         // (In a full implementation, verifier would reject this)
-        assert!(proof.ood_values.composition_at_z != wrong_proof.ood_values.composition_at_z
-                || proof.ood_values.composition_at_z == M31::ZERO);
+        assert!(
+            proof.ood_values.composition_at_z != wrong_proof.ood_values.composition_at_z
+                || proof.ood_values.composition_at_z == M31::ZERO
+        );
     }
-    
+
     #[test]
     fn test_boundary_constraint_x0_zero() {
         // Test that boundary constraints enforce x0 = 0
         let trace_len = 8;
         let entry_point = 0x0u32;
-        
+
         // Create trace where x0 (rd_val at first row) is non-zero
         let mut columns: Vec<Vec<M31>> = Vec::new();
-        
+
         // Columns 0-9: standard columns
         for i in 0..10 {
             columns.push((0..trace_len).map(|j| M31::new((i + j) as u32)).collect());
         }
-        
+
         // Column 10: rd_val_lo (should be 0 at first row for x0 constraint)
         let mut rd_val_lo = vec![M31::new(42)]; // Non-zero at first row
         for j in 1..trace_len {
             rd_val_lo.push(M31::new(j as u32));
         }
         columns.push(rd_val_lo);
-        
+
         // Column 11: rd_val_hi
         columns.push(vec![M31::ZERO; trace_len]);
-        
+
         // Fill remaining columns
         for _ in 12..77 {
             columns.push(vec![M31::ZERO; trace_len]);
         }
-        
+
         let config = StarkConfig {
             log_trace_len: 3,
             blowup_factor: 4,
@@ -1188,10 +1197,10 @@ mod tests {
             security_bits: 50,
             entry_point,
         };
-        
+
         let mut prover = StarkProver::new(config);
         let proof = prover.prove(columns, &vec![]);
-        
+
         // Proof generates but composition should be non-zero at boundary
         // (would be rejected by verifier)
         assert_eq!(proof.trace_commitment.len(), 32);

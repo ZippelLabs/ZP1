@@ -33,8 +33,8 @@
 //! | 0xC11 | DELEG_U256_MUL | U256 multiplication |
 //! | 0xC12 | DELEG_U256_MOD | U256 modular reduction |
 
-use zp1_primitives::{M31, QM31};
 use std::collections::HashMap;
+use zp1_primitives::{M31, QM31};
 
 /// Delegation CSR addresses.
 pub mod csr {
@@ -139,34 +139,40 @@ impl DelegationCall {
         outputs: Vec<u32>,
         call_id: u64,
     ) -> Self {
-        Self { deleg_type, timestamp, inputs, outputs, call_id }
+        Self {
+            deleg_type,
+            timestamp,
+            inputs,
+            outputs,
+            call_id,
+        }
     }
 
     /// Compute fingerprint for log-derivative lookup.
     pub fn fingerprint(&self, alpha: QM31) -> QM31 {
         let mut fp = QM31::from(self.deleg_type.to_field());
         let mut alpha_power = alpha;
-        
+
         // Include call ID
         fp = fp + alpha_power * QM31::from(M31::new((self.call_id & 0x7FFFFFFF) as u32));
         alpha_power = alpha_power * alpha;
-        
+
         // Include timestamp
         fp = fp + alpha_power * QM31::from(M31::new((self.timestamp & 0x7FFFFFFF) as u32));
         alpha_power = alpha_power * alpha;
-        
+
         // Include inputs
         for &input in &self.inputs {
             fp = fp + alpha_power * QM31::from(M31::new(input));
             alpha_power = alpha_power * alpha;
         }
-        
+
         // Include outputs
         for &output in &self.outputs {
             fp = fp + alpha_power * QM31::from(M31::new(output));
             alpha_power = alpha_power * alpha;
         }
-        
+
         fp
     }
 }
@@ -192,7 +198,12 @@ impl DelegationResult {
         outputs: Vec<u32>,
         computation_proof: Vec<M31>,
     ) -> Self {
-        Self { deleg_type, call_id, outputs, computation_proof }
+        Self {
+            deleg_type,
+            call_id,
+            outputs,
+            computation_proof,
+        }
     }
 }
 
@@ -239,35 +250,35 @@ impl DelegationArgumentProver {
     pub fn generate_columns(&self) -> DelegationColumns {
         let n_calls = self.calls.len();
         let n_results = self.results.len();
-        
+
         // Call columns
         let mut call_type = Vec::with_capacity(n_calls);
         let mut call_id = Vec::with_capacity(n_calls);
         let mut call_timestamp = Vec::with_capacity(n_calls);
         let mut call_fingerprints = Vec::with_capacity(n_calls);
-        
-        // Result columns  
+
+        // Result columns
         let mut result_type = Vec::with_capacity(n_results);
         let mut result_call_id = Vec::with_capacity(n_results);
         let mut result_fingerprints = Vec::with_capacity(n_results);
-        
+
         for call in &self.calls {
             call_type.push(call.deleg_type.to_field());
             call_id.push(M31::new((call.call_id & 0x7FFFFFFF) as u32));
             call_timestamp.push(M31::new((call.timestamp & 0x7FFFFFFF) as u32));
             call_fingerprints.push(call.fingerprint(self.alpha));
         }
-        
+
         for result in &self.results {
             result_type.push(result.deleg_type.to_field());
             result_call_id.push(M31::new((result.call_id & 0x7FFFFFFF) as u32));
             // Result fingerprint should match call fingerprint for same call_id
             result_fingerprints.push(self.compute_result_fingerprint(result));
         }
-        
+
         // Compute log-derivative accumulator
         let (log_deriv_num, log_deriv_denom) = self.compute_log_derivative();
-        
+
         DelegationColumns {
             call_type,
             call_id,
@@ -285,28 +296,28 @@ impl DelegationArgumentProver {
     fn compute_result_fingerprint(&self, result: &DelegationResult) -> QM31 {
         let mut fp = QM31::from(result.deleg_type.to_field());
         let mut alpha_power = self.alpha;
-        
+
         // Include call ID
         fp = fp + alpha_power * QM31::from(M31::new((result.call_id & 0x7FFFFFFF) as u32));
         alpha_power = alpha_power * self.alpha;
-        
+
         // Include outputs (inputs not needed - they're determined by call)
         for &output in &result.outputs {
             fp = fp + alpha_power * QM31::from(M31::new(output));
             alpha_power = alpha_power * self.alpha;
         }
-        
+
         fp
     }
 
     /// Compute log-derivative accumulator for set equality.
-    /// 
+    ///
     /// For set equality, we need: Σ 1/(call_fp + β) = Σ 1/(result_fp + β)
     fn compute_log_derivative(&self) -> (Vec<QM31>, Vec<QM31>) {
         let n = self.calls.len().max(self.results.len());
         let mut numerator = vec![QM31::ONE; n];
         let mut denominator = vec![QM31::ONE; n];
-        
+
         // Accumulate call fingerprints
         let mut call_prod = QM31::ONE;
         for (i, call) in self.calls.iter().enumerate() {
@@ -316,7 +327,7 @@ impl DelegationArgumentProver {
                 numerator[i] = call_prod;
             }
         }
-        
+
         // Accumulate result fingerprints
         let mut result_prod = QM31::ONE;
         for (i, result) in self.results.iter().enumerate() {
@@ -326,7 +337,7 @@ impl DelegationArgumentProver {
                 denominator[i] = result_prod;
             }
         }
-        
+
         (numerator, denominator)
     }
 
@@ -336,14 +347,18 @@ impl DelegationArgumentProver {
         let mut result_map: HashMap<u64, &DelegationResult> = HashMap::new();
         for result in &self.results {
             if result_map.insert(result.call_id, result).is_some() {
-                return Err(DelegationError::DuplicateResult { call_id: result.call_id });
+                return Err(DelegationError::DuplicateResult {
+                    call_id: result.call_id,
+                });
             }
         }
-        
+
         for call in &self.calls {
             match result_map.get(&call.call_id) {
                 None => {
-                    return Err(DelegationError::MissingResult { call_id: call.call_id });
+                    return Err(DelegationError::MissingResult {
+                        call_id: call.call_id,
+                    });
                 }
                 Some(result) => {
                     if result.deleg_type != call.deleg_type {
@@ -356,7 +371,7 @@ impl DelegationArgumentProver {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -364,7 +379,10 @@ impl DelegationArgumentProver {
     pub fn by_type(&self) -> HashMap<DelegationType, Vec<&DelegationCall>> {
         let mut grouped = HashMap::new();
         for call in &self.calls {
-            grouped.entry(call.deleg_type).or_insert_with(Vec::new).push(call);
+            grouped
+                .entry(call.deleg_type)
+                .or_insert_with(Vec::new)
+                .push(call);
         }
         grouped
     }
@@ -384,12 +402,12 @@ pub struct DelegationColumns {
     pub call_id: Vec<M31>,
     pub call_timestamp: Vec<M31>,
     pub call_fingerprints: Vec<QM31>,
-    
+
     // Result columns (from precompile circuits)
     pub result_type: Vec<M31>,
     pub result_call_id: Vec<M31>,
     pub result_fingerprints: Vec<QM31>,
-    
+
     // Log-derivative accumulator
     pub log_deriv_numerator: Vec<QM31>,
     pub log_deriv_denominator: Vec<QM31>,
@@ -424,11 +442,21 @@ impl std::fmt::Display for DelegationError {
             DelegationError::DuplicateResult { call_id } => {
                 write!(f, "Duplicate result for delegation call {}", call_id)
             }
-            DelegationError::TypeMismatch { call_id, expected, actual } => {
-                write!(f, "Type mismatch for call {}: expected {:?}, got {:?}", 
-                       call_id, expected, actual)
+            DelegationError::TypeMismatch {
+                call_id,
+                expected,
+                actual,
+            } => {
+                write!(
+                    f,
+                    "Type mismatch for call {}: expected {:?}, got {:?}",
+                    call_id, expected, actual
+                )
             }
-            DelegationError::InvalidInputs { deleg_type, message } => {
+            DelegationError::InvalidInputs {
+                deleg_type,
+                message,
+            } => {
                 write!(f, "Invalid inputs for {:?}: {}", deleg_type, message)
             }
         }
@@ -438,7 +466,7 @@ impl std::fmt::Display for DelegationError {
 impl std::error::Error for DelegationError {}
 
 /// Memory subtree for delegation circuit.
-/// 
+///
 /// Each delegation type has its own Merkle subtree for pre-commitment,
 /// enabling parallel proving of delegation circuits.
 #[derive(Debug, Clone)]
@@ -473,7 +501,7 @@ impl DelegationSubtree {
             outputs,
             Vec::new(), // Computation proof filled by circuit
         );
-        
+
         self.calls.push(call);
         self.results.push(result.clone());
         result
@@ -513,12 +541,12 @@ impl DelegationSubtree {
         let n = self.calls.len();
         let mut type_col = Vec::with_capacity(n);
         let mut call_id_col = Vec::with_capacity(n);
-        
+
         for call in &self.calls {
             type_col.push(call.deleg_type.to_field());
             call_id_col.push(M31::new((call.call_id & 0x7FFFFFFF) as u32));
         }
-        
+
         vec![type_col, call_id_col]
     }
 }
@@ -529,8 +557,14 @@ mod tests {
 
     #[test]
     fn test_delegation_type_from_csr() {
-        assert_eq!(DelegationType::from_csr(0xC00), Some(DelegationType::Blake2s));
-        assert_eq!(DelegationType::from_csr(0xC10), Some(DelegationType::U256Add));
+        assert_eq!(
+            DelegationType::from_csr(0xC00),
+            Some(DelegationType::Blake2s)
+        );
+        assert_eq!(
+            DelegationType::from_csr(0xC10),
+            Some(DelegationType::U256Add)
+        );
         assert_eq!(DelegationType::from_csr(0x123), None);
     }
 
@@ -543,14 +577,14 @@ mod tests {
             vec![0x3000],
             1,
         );
-        
+
         let alpha = QM31::from(M31::new(7));
         let fp1 = call.fingerprint(alpha);
         let fp2 = call.fingerprint(alpha);
-        
+
         // Same call should give same fingerprint
         assert_eq!(fp1, fp2);
-        
+
         // Different call should give different fingerprint
         let call2 = DelegationCall::new(
             DelegationType::Blake2s,
@@ -566,36 +600,54 @@ mod tests {
     #[test]
     fn test_delegation_argument_verify_valid() {
         let mut prover = DelegationArgumentProver::new();
-        
+
         prover.add_call(DelegationCall::new(
-            DelegationType::Blake2s, 100, vec![0x1000], vec![0x2000], 1
+            DelegationType::Blake2s,
+            100,
+            vec![0x1000],
+            vec![0x2000],
+            1,
         ));
         prover.add_call(DelegationCall::new(
-            DelegationType::U256Add, 200, vec![0x3000], vec![0x4000], 2
+            DelegationType::U256Add,
+            200,
+            vec![0x3000],
+            vec![0x4000],
+            2,
         ));
-        
+
         prover.add_result(DelegationResult::new(
-            DelegationType::Blake2s, 1, vec![0xABCD], vec![]
+            DelegationType::Blake2s,
+            1,
+            vec![0xABCD],
+            vec![],
         ));
         prover.add_result(DelegationResult::new(
-            DelegationType::U256Add, 2, vec![0xEF01], vec![]
+            DelegationType::U256Add,
+            2,
+            vec![0xEF01],
+            vec![],
         ));
-        
+
         assert!(prover.verify().is_ok());
     }
 
     #[test]
     fn test_delegation_argument_verify_missing_result() {
         let mut prover = DelegationArgumentProver::new();
-        
+
         prover.add_call(DelegationCall::new(
-            DelegationType::Blake2s, 100, vec![0x1000], vec![0x2000], 1
+            DelegationType::Blake2s,
+            100,
+            vec![0x1000],
+            vec![0x2000],
+            1,
         ));
         // No result added!
-        
+
         let result = prover.verify();
         assert!(result.is_err());
-        
+
         if let Err(DelegationError::MissingResult { call_id }) = result {
             assert_eq!(call_id, 1);
         } else {
@@ -606,18 +658,28 @@ mod tests {
     #[test]
     fn test_delegation_argument_verify_type_mismatch() {
         let mut prover = DelegationArgumentProver::new();
-        
+
         prover.add_call(DelegationCall::new(
-            DelegationType::Blake2s, 100, vec![0x1000], vec![0x2000], 1
+            DelegationType::Blake2s,
+            100,
+            vec![0x1000],
+            vec![0x2000],
+            1,
         ));
         prover.add_result(DelegationResult::new(
-            DelegationType::U256Add, 1, vec![0xABCD], vec![] // Wrong type!
+            DelegationType::U256Add,
+            1,
+            vec![0xABCD],
+            vec![], // Wrong type!
         ));
-        
+
         let result = prover.verify();
         assert!(result.is_err());
-        
-        if let Err(DelegationError::TypeMismatch { expected, actual, .. }) = result {
+
+        if let Err(DelegationError::TypeMismatch {
+            expected, actual, ..
+        }) = result
+        {
             assert_eq!(expected, DelegationType::Blake2s);
             assert_eq!(actual, DelegationType::U256Add);
         }
@@ -626,13 +688,17 @@ mod tests {
     #[test]
     fn test_delegation_subtree() {
         let mut subtree = DelegationSubtree::new(DelegationType::Blake2s);
-        
+
         let call = DelegationCall::new(
-            DelegationType::Blake2s, 100, vec![0x1000, 0x2000], vec![], 1
+            DelegationType::Blake2s,
+            100,
+            vec![0x1000, 0x2000],
+            vec![],
+            1,
         );
-        
+
         let result = subtree.process_call(call);
-        
+
         assert_eq!(result.deleg_type, DelegationType::Blake2s);
         assert_eq!(result.call_id, 1);
         assert!(!result.outputs.is_empty());
@@ -641,14 +707,38 @@ mod tests {
     #[test]
     fn test_by_type() {
         let mut prover = DelegationArgumentProver::new();
-        
-        prover.add_call(DelegationCall::new(DelegationType::Blake2s, 100, vec![], vec![], 1));
-        prover.add_call(DelegationCall::new(DelegationType::U256Add, 200, vec![], vec![], 2));
-        prover.add_call(DelegationCall::new(DelegationType::Blake2s, 300, vec![], vec![], 3));
-        
+
+        prover.add_call(DelegationCall::new(
+            DelegationType::Blake2s,
+            100,
+            vec![],
+            vec![],
+            1,
+        ));
+        prover.add_call(DelegationCall::new(
+            DelegationType::U256Add,
+            200,
+            vec![],
+            vec![],
+            2,
+        ));
+        prover.add_call(DelegationCall::new(
+            DelegationType::Blake2s,
+            300,
+            vec![],
+            vec![],
+            3,
+        ));
+
         let by_type = prover.by_type();
-        
-        assert_eq!(by_type.get(&DelegationType::Blake2s).map(|v| v.len()), Some(2));
-        assert_eq!(by_type.get(&DelegationType::U256Add).map(|v| v.len()), Some(1));
+
+        assert_eq!(
+            by_type.get(&DelegationType::Blake2s).map(|v| v.len()),
+            Some(2)
+        );
+        assert_eq!(
+            by_type.get(&DelegationType::U256Add).map(|v| v.len()),
+            Some(1)
+        );
     }
 }

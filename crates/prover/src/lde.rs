@@ -8,7 +8,7 @@
 //! 2. Extend coefficients to larger domain
 //! 3. Evaluate on extended domain (FFT)
 
-use zp1_primitives::{M31, CircleFFT, CirclePoint};
+use zp1_primitives::{CircleFFT, CirclePoint, M31};
 
 /// LDE domain configuration.
 #[derive(Clone, Debug)]
@@ -28,9 +28,12 @@ pub struct LdeDomain {
 impl LdeDomain {
     /// Create a new LDE domain.
     pub fn new(trace_len: usize, blowup: usize) -> Self {
-        assert!(trace_len.is_power_of_two(), "Trace length must be power of 2");
+        assert!(
+            trace_len.is_power_of_two(),
+            "Trace length must be power of 2"
+        );
         assert!(blowup.is_power_of_two(), "Blowup must be power of 2");
-        
+
         let log_trace_len = trace_len.trailing_zeros() as usize;
         let log_blowup = blowup.trailing_zeros() as usize;
         let log_domain_size = log_trace_len + log_blowup;
@@ -70,11 +73,15 @@ impl LdeDomain {
 
     /// Perform LDE on a single column using Circle FFT.
     pub fn extend(&self, values: &[M31]) -> Vec<M31> {
-        assert_eq!(values.len(), self.trace_len(), "Input must match trace length");
-        
+        assert_eq!(
+            values.len(),
+            self.trace_len(),
+            "Input must match trace length"
+        );
+
         // Step 1: iFFT to get coefficients
         let coeffs = self.trace_fft.ifft(values);
-        
+
         // Step 2: FFT on extended domain (zero-padded coefficients)
         self.extended_fft.fft(&coeffs)
     }
@@ -113,11 +120,11 @@ impl TraceLDE {
     /// Create a new trace LDE.
     pub fn new(trace_columns: &[Vec<M31>], blowup: usize) -> Self {
         assert!(!trace_columns.is_empty(), "Need at least one column");
-        
+
         let trace_len = trace_columns[0].len();
         let domain = LdeDomain::new(trace_len, blowup);
         let columns = domain.extend_columns(trace_columns);
-        
+
         Self { domain, columns }
     }
 
@@ -177,10 +184,10 @@ mod tests {
     fn test_lde_single_column() {
         let domain = LdeDomain::new(8, 4);
         let values: Vec<M31> = (0..8).map(|i| M31::new(i)).collect();
-        
+
         let extended = domain.extend(&values);
         assert_eq!(extended.len(), 32);
-        
+
         // The extended evaluations should match the original at trace points
         // (every 4th point since blowup=4)
         // Note: This depends on domain structure, simplified check here
@@ -191,9 +198,9 @@ mod tests {
     fn test_trace_lde() {
         let col1: Vec<M31> = (0..8).map(|i| M31::new(i)).collect();
         let col2: Vec<M31> = (0..8).map(|i| M31::new(i * 2)).collect();
-        
+
         let trace_lde = TraceLDE::new(&[col1, col2], 4);
-        
+
         assert_eq!(trace_lde.num_columns(), 2);
         assert_eq!(trace_lde.domain_size(), 32);
     }
@@ -202,15 +209,14 @@ mod tests {
     fn test_lde_preserves_low_degree() {
         // A low-degree polynomial should remain low-degree after extension
         let domain = LdeDomain::new(8, 4);
-        
+
         // Linear function: f(i) = 3i + 7
         let values: Vec<M31> = (0..8).map(|i| M31::new(3 * i as u32 + 7)).collect();
-        
+
         let extended = domain.extend(&values);
         assert_eq!(extended.len(), 32);
-        
+
         // After LDE, interpolating through extended points should give
         // a polynomial of degree < trace_len (since original was low-degree)
     }
 }
-

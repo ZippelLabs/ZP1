@@ -17,9 +17,9 @@
 //!
 //! This halves both the domain size and polynomial degree.
 
-use zp1_primitives::M31;
 use crate::channel::ProverChannel;
 use crate::commitment::MerkleTree;
+use zp1_primitives::M31;
 
 /// FRI configuration parameters.
 #[derive(Clone, Debug)]
@@ -50,15 +50,15 @@ impl FriConfig {
     pub fn new(log_domain_size: usize) -> Self {
         Self::with_security(log_domain_size, SecurityLevel::Bits100)
     }
-    
+
     /// Create a FRI configuration with specified security level.
     pub fn with_security(log_domain_size: usize, level: SecurityLevel) -> Self {
         let num_queries = match level {
-            SecurityLevel::Bits80 => 40,   // ~80 bits from FRI
-            SecurityLevel::Bits100 => 50,  // ~100 bits from FRI  
-            SecurityLevel::Bits128 => 64,  // ~128 bits from FRI
+            SecurityLevel::Bits80 => 40,  // ~80 bits from FRI
+            SecurityLevel::Bits100 => 50, // ~100 bits from FRI
+            SecurityLevel::Bits128 => 64, // ~128 bits from FRI
         };
-        
+
         Self {
             log_domain_size,
             folding_factor: 2,
@@ -66,13 +66,13 @@ impl FriConfig {
             final_degree: 8,
         }
     }
-    
+
     /// Create a fast configuration for testing (reduced security).
     pub fn fast(log_domain_size: usize) -> Self {
         Self {
             log_domain_size,
             folding_factor: 2,
-            num_queries: 10,  // Fast but insecure
+            num_queries: 10, // Fast but insecure
             final_degree: 8,
         }
     }
@@ -86,7 +86,7 @@ impl FriConfig {
         }
         (self.log_domain_size - log_final) / log_fold
     }
-    
+
     /// Get domain size at a specific layer.
     pub fn layer_domain_size(&self, layer: usize) -> usize {
         let log_fold = (self.folding_factor as f64).log2() as usize;
@@ -116,7 +116,7 @@ impl FriLayer {
             tree,
         }
     }
-    
+
     /// Generate a Merkle proof for an index.
     pub fn prove(&self, index: usize) -> Vec<[u8; 32]> {
         self.tree.prove(index).path
@@ -182,7 +182,7 @@ impl FriProver {
             evaluations.len() == 1 << self.config.log_domain_size,
             "Evaluations must match domain size"
         );
-        
+
         let mut layers = Vec::with_capacity(self.config.num_layers());
         let mut current_evals = evaluations;
 
@@ -204,10 +204,8 @@ impl FriProver {
         let final_poly = current_evals;
 
         // Generate query proofs
-        let query_indices = channel.squeeze_query_indices(
-            self.config.num_queries,
-            1 << self.config.log_domain_size,
-        );
+        let query_indices = channel
+            .squeeze_query_indices(self.config.num_queries, 1 << self.config.log_domain_size);
         let query_proofs = self.generate_query_proofs(&layers, &query_indices);
 
         let proof = FriProof {
@@ -228,7 +226,7 @@ impl FriProver {
     /// This halves the domain size while maintaining the RS proximity property.
     fn fold_circle(&self, evals: &[M31], alpha: M31, layer: usize) -> Vec<M31> {
         use zp1_primitives::CirclePoint;
-        
+
         let n = evals.len();
         let half_n = n / 2;
         let mut folded = Vec::with_capacity(half_n);
@@ -254,7 +252,7 @@ impl FriProver {
             // point_i = generator^i
             let point_i = generator.pow(i as u64);
             let y_i = point_i.y;
-            
+
             // Proper Circle FRI folding formula:
             // f_folded = (sum / 2) + alpha * (diff / (2 * y_i))
             // = (sum / 2) + alpha * diff * inv_two * y_i^(-1)
@@ -266,7 +264,7 @@ impl FriProver {
                 let y_inv = y_i.inv();
                 sum * inv_two + alpha * diff * inv_two * y_inv
             };
-            
+
             folded.push(folded_val);
         }
 
@@ -274,11 +272,7 @@ impl FriProver {
     }
 
     /// Generate query proofs for all requested positions.
-    fn generate_query_proofs(
-        &self,
-        layers: &[FriLayer],
-        indices: &[usize],
-    ) -> Vec<FriQueryProof> {
+    fn generate_query_proofs(&self, layers: &[FriLayer], indices: &[usize]) -> Vec<FriQueryProof> {
         indices
             .iter()
             .map(|&initial_idx| {
@@ -289,14 +283,14 @@ impl FriProver {
                     let n = layer.evaluations.len();
                     // Ensure index is in range
                     current_idx %= n;
-                    
+
                     // Sibling is at index + n/2 (mod n) for twin-coset structure
                     let sibling_idx = (current_idx + n / 2) % n;
-                    
+
                     // Get values
                     let value = layer.evaluations[current_idx];
                     let sibling_value = layer.evaluations[sibling_idx];
-                    
+
                     // Get Merkle proof
                     let merkle_proof = layer.prove(current_idx);
 
@@ -317,7 +311,7 @@ impl FriProver {
             })
             .collect()
     }
-    
+
     /// Verify a FRI proof (used by the verifier).
     pub fn verify(
         &self,
@@ -327,29 +321,27 @@ impl FriProver {
     ) -> bool {
         // Absorb initial commitment
         channel.absorb_commitment(initial_commitment);
-        
+
         // Collect challenges
         let mut challenges = Vec::with_capacity(proof.layer_commitments.len());
         for commitment in &proof.layer_commitments {
             channel.absorb_commitment(commitment);
             challenges.push(channel.squeeze_challenge());
         }
-        
+
         // Verify each query
-        let query_indices = channel.squeeze_query_indices(
-            self.config.num_queries,
-            1 << self.config.log_domain_size,
-        );
-        
+        let query_indices = channel
+            .squeeze_query_indices(self.config.num_queries, 1 << self.config.log_domain_size);
+
         for (query_idx, query_proof) in proof.query_proofs.iter().enumerate() {
             if query_proof.index != query_indices[query_idx] {
                 return false;
             }
-            
+
             // Verify folding consistency through layers
             let mut current_idx = query_proof.index;
             let mut expected_value = None;
-            
+
             for (layer_idx, layer_proof) in query_proof.layer_proofs.iter().enumerate() {
                 // If we have an expected value from previous folding, verify it
                 if let Some(expected) = expected_value {
@@ -357,21 +349,21 @@ impl FriProver {
                         return false;
                     }
                 }
-                
+
                 // Verify Merkle proof
                 // (In full implementation, would verify against layer commitment)
-                
+
                 // Compute expected folded value for next layer
                 let alpha = challenges[layer_idx];
                 let inv_two = M31::new(2).inv();
                 let sum = layer_proof.value + layer_proof.sibling_value;
                 let diff = layer_proof.value - layer_proof.sibling_value;
                 let folded = sum * inv_two + alpha * diff * inv_two;
-                
+
                 expected_value = Some(folded);
                 current_idx /= 2;
             }
-            
+
             // Verify final value matches final polynomial evaluation
             if let Some(expected) = expected_value {
                 let final_eval = evaluate_poly_at(&proof.final_poly, current_idx);
@@ -380,7 +372,7 @@ impl FriProver {
                 }
             }
         }
-        
+
         true
     }
 }
@@ -414,7 +406,7 @@ mod tests {
 
         let folded = prover.fold_circle(&evals, alpha, 0);
         assert_eq!(folded.len(), 8);
-        
+
         // Verify folding is deterministic
         let folded2 = prover.fold_circle(&evals, alpha, 0);
         assert_eq!(folded, folded2);
@@ -433,7 +425,7 @@ mod tests {
         assert!(!proof.final_poly.is_empty());
         assert!(!proof.layer_commitments.is_empty());
         assert!(!proof.query_proofs.is_empty());
-        
+
         // Verify query proofs have Merkle paths
         for query in &proof.query_proofs {
             for layer_proof in &query.layer_proofs {
@@ -442,22 +434,22 @@ mod tests {
             }
         }
     }
-    
+
     #[test]
     fn test_fri_layer() {
         let evals: Vec<M31> = (0..8).map(|i| M31::new(i)).collect();
         let layer = FriLayer::new(evals.clone());
-        
+
         // Verify commitment is non-zero
         assert_ne!(layer.commitment, [0u8; 32]);
-        
+
         // Verify Merkle proofs
         for i in 0..8 {
             let proof = layer.prove(i);
             assert!(!proof.is_empty());
         }
     }
-    
+
     #[test]
     fn test_fri_multiple_folds() {
         let config = FriConfig {
@@ -468,21 +460,21 @@ mod tests {
         };
         let prover = FriProver::new(config.clone());
         let evals: Vec<M31> = (0..64).map(|i| M31::new(i)).collect();
-        
+
         let mut channel = ProverChannel::new(b"test");
         let (layers, proof) = prover.commit(evals, &mut channel);
-        
+
         // Should have multiple layers
         assert!(layers.len() >= 2);
-        
+
         // Each layer should be half the size of previous
         for i in 1..layers.len() {
             assert_eq!(
                 layers[i].evaluations.len(),
-                layers[i-1].evaluations.len() / 2
+                layers[i - 1].evaluations.len() / 2
             );
         }
-        
+
         // Final poly should be small
         assert!(proof.final_poly.len() <= config.final_degree * 2);
     }

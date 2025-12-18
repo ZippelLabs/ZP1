@@ -8,9 +8,9 @@
 
 #![allow(dead_code)]
 
+use crate::stark::StarkProof;
 use blake3::Hasher;
 use zp1_primitives::M31;
-use crate::stark::StarkProof;
 
 // M31 modulus
 const M31_MODULUS: u32 = (1 << 31) - 1;
@@ -62,7 +62,7 @@ impl RecursiveProver {
     pub fn new(config: RecursionConfig) -> Self {
         Self { config }
     }
-    
+
     /// Aggregate multiple proofs into one.
     ///
     /// The aggregated proof proves that all inner proofs are valid.
@@ -70,17 +70,18 @@ impl RecursiveProver {
         if proofs.is_empty() {
             return Err(RecursionError::EmptyBatch);
         }
-        
+
         if proofs.len() > self.config.max_batch_size {
             return Err(RecursionError::BatchTooLarge {
                 size: proofs.len(),
                 max: self.config.max_batch_size,
             });
         }
-        
+
         if self.config.verify_structure {
             for (i, proof) in proofs.iter().enumerate() {
-                self.validate_proof(proof).map_err(|msg| RecursionError::InvalidProof(format!("proof {}: {}", i, msg)))?;
+                self.validate_proof(proof)
+                    .map_err(|msg| RecursionError::InvalidProof(format!("proof {}: {}", i, msg)))?;
             }
         }
 
@@ -98,16 +99,16 @@ impl RecursiveProver {
                     .collect()
             })
             .collect();
-        
+
         // Compute commitment to all proofs
         let verifier_commitment = self.compute_batch_commitment(proofs);
-        
+
         // Placeholder aggregated proof: we cannot build a real recursive proof here.
         // We retain the first proof's structure but bind both commitments to the batch hash.
         let mut aggregated = proofs[0].clone();
         aggregated.trace_commitment = verifier_commitment;
         aggregated.composition_commitment = verifier_commitment;
-        
+
         Ok(RecursiveProof {
             inner_proof: aggregated,
             num_aggregated: proofs.len(),
@@ -115,7 +116,7 @@ impl RecursiveProver {
             verifier_commitment,
         })
     }
-    
+
     /// Compute commitment to a batch of proofs.
     fn compute_batch_commitment(&self, proofs: &[StarkProof]) -> [u8; 32] {
         let mut hasher = Hasher::new();
@@ -150,23 +151,23 @@ impl RecursiveProver {
         }
         Ok(())
     }
-    
+
     /// Flatten public outputs for aggregated proof.
     fn flatten_public_outputs(outputs: &[Vec<M31>]) -> Vec<M31> {
         let mut result = Vec::new();
-        
+
         // Add count of inner proofs
         result.push(M31::new(outputs.len() as u32));
-        
+
         // Add each proof's outputs prefixed by length
         for out in outputs {
             result.push(M31::new(out.len() as u32));
             result.extend(out.iter().cloned());
         }
-        
+
         result
     }
-    
+
     /// Recursively aggregate proofs in a tree structure.
     ///
     /// This allows aggregating more proofs than the batch size by
@@ -175,26 +176,26 @@ impl RecursiveProver {
         if proofs.is_empty() {
             return Err(RecursionError::EmptyBatch);
         }
-        
+
         if proofs.len() == 1 {
             // Base case: wrap single proof
             return self.aggregate(proofs);
         }
-        
+
         // Recursively aggregate in batches
         let mut level_proofs = proofs.to_vec();
-        
+
         while level_proofs.len() > self.config.max_batch_size {
             let mut next_level = Vec::new();
-            
+
             for chunk in level_proofs.chunks(self.config.max_batch_size) {
                 let aggregated = self.aggregate(chunk)?;
                 next_level.push(aggregated.inner_proof);
             }
-            
+
             level_proofs = next_level;
         }
-        
+
         self.aggregate(&level_proofs)
     }
 }
@@ -258,35 +259,32 @@ impl SegmentedProver {
             config,
         }
     }
-    
+
     /// Add a segment proof.
     pub fn add_segment(&mut self, continuation: ProofContinuation) {
         self.segments.push(continuation);
     }
-    
+
     /// Get accumulated segment count.
     pub fn num_segments(&self) -> usize {
         self.segments.len()
     }
-    
+
     /// Finalize and aggregate all segments.
     pub fn finalize(self) -> Result<RecursiveProof, RecursionError> {
         if self.segments.is_empty() {
             return Err(RecursionError::EmptyBatch);
         }
-        
+
         // Verify segment chain
         for _i in 1..self.segments.len() {
             // In real implementation, verify state continuity
             // prev.final_state should match curr.initial_state
         }
-        
+
         // Aggregate segment proofs
-        let proofs: Vec<StarkProof> = self.segments
-            .into_iter()
-            .map(|s| s.segment_proof)
-            .collect();
-        
+        let proofs: Vec<StarkProof> = self.segments.into_iter().map(|s| s.segment_proof).collect();
+
         let prover = RecursiveProver::new(self.config);
         prover.tree_aggregate(&proofs)
     }
@@ -305,7 +303,7 @@ impl ProofCompressor {
     pub fn new(target_size: usize) -> Self {
         Self { target_size }
     }
-    
+
     /// Compress a proof by recursively verifying it.
     pub fn compress(&self, proof: &StarkProof) -> Result<StarkProof, RecursionError> {
         // In a real implementation:
@@ -314,11 +312,11 @@ impl ProofCompressor {
         // 3. Prove the verification with smaller parameters
         //
         // This reduces proof size at the cost of proving time
-        
+
         // Placeholder: return proof unchanged
         Ok(proof.clone())
     }
-    
+
     /// Estimate compressed proof size.
     pub fn estimate_size(&self, proof: &StarkProof) -> usize {
         // Simplified estimate based on actual StarkProof structure
@@ -335,7 +333,7 @@ mod tests {
     use super::*;
     use crate::fri::FriProof;
     use crate::stark::OodValues;
-    
+
     fn mock_proof() -> StarkProof {
         StarkProof {
             trace_commitment: [1u8; 32],
@@ -353,33 +351,33 @@ mod tests {
             query_proofs: vec![],
         }
     }
-    
+
     #[test]
     fn test_aggregate_single() {
         let prover = RecursiveProver::new(RecursionConfig::default());
         let proof = mock_proof();
-        
+
         let result = prover.aggregate(&[proof]).unwrap();
         assert_eq!(result.num_aggregated, 1);
     }
-    
+
     #[test]
     fn test_aggregate_multiple() {
         let prover = RecursiveProver::new(RecursionConfig::default());
         let proofs = vec![mock_proof(), mock_proof(), mock_proof()];
-        
+
         let result = prover.aggregate(&proofs).unwrap();
         assert_eq!(result.num_aggregated, 3);
         assert_eq!(result.public_outputs.len(), 3);
     }
-    
+
     #[test]
     fn test_aggregate_empty() {
         let prover = RecursiveProver::new(RecursionConfig::default());
         let result = prover.aggregate(&[]);
         assert!(matches!(result, Err(RecursionError::EmptyBatch)));
     }
-    
+
     #[test]
     fn test_aggregate_too_large() {
         let config = RecursionConfig {
@@ -388,11 +386,11 @@ mod tests {
         };
         let prover = RecursiveProver::new(config);
         let proofs = vec![mock_proof(), mock_proof(), mock_proof()];
-        
+
         let result = prover.aggregate(&proofs);
         assert!(matches!(result, Err(RecursionError::BatchTooLarge { .. })));
     }
-    
+
     #[test]
     fn test_tree_aggregate() {
         let config = RecursionConfig {
@@ -400,18 +398,18 @@ mod tests {
             ..Default::default()
         };
         let prover = RecursiveProver::new(config);
-        
+
         // Create 5 proofs (requires tree aggregation with batch size 2)
         let proofs: Vec<_> = (0..5).map(|_| mock_proof()).collect();
-        
+
         let result = prover.tree_aggregate(&proofs).unwrap();
         assert!(result.num_aggregated > 0);
     }
-    
+
     #[test]
     fn test_segmented_prover() {
         let mut prover = SegmentedProver::new(RecursionConfig::default());
-        
+
         // Add segments
         for i in 0..3 {
             prover.add_segment(ProofContinuation {
@@ -421,25 +419,25 @@ mod tests {
                 is_final: i == 2,
             });
         }
-        
+
         assert_eq!(prover.num_segments(), 3);
-        
+
         let result = prover.finalize().unwrap();
         assert!(result.num_aggregated > 0);
     }
-    
+
     #[test]
     fn test_proof_compressor() {
         let compressor = ProofCompressor::new(1024);
         let proof = mock_proof();
-        
+
         let size = compressor.estimate_size(&proof);
         assert!(size > 0);
-        
+
         let compressed = compressor.compress(&proof).unwrap();
         assert_eq!(compressed.trace_commitment, proof.trace_commitment);
     }
-    
+
     #[test]
     fn test_recursion_error_display() {
         let err = RecursionError::BatchTooLarge { size: 10, max: 4 };

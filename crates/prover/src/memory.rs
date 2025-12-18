@@ -590,10 +590,10 @@ impl MemoryAirConstraints {
     /// Constraint: same_addr * is_read * (value_curr - value_prev) = 0
     pub fn consistency_constraint(
         &self,
-        same_addr: M31,    // 1 if same address as previous
-        is_read: M31,      // 1 if current op is read
-        value_curr: M31,   // current value
-        value_prev: M31,   // previous value
+        same_addr: M31,  // 1 if same address as previous
+        is_read: M31,    // 1 if current op is read
+        value_curr: M31, // current value
+        value_prev: M31, // previous value
     ) -> M31 {
         // same_addr * is_read * (value_curr - value_prev) should be 0
         let value_diff = value_curr - value_prev;
@@ -607,12 +607,7 @@ impl MemoryAirConstraints {
     /// where inverse proves ts_curr - ts_prev - 1 >= 0
     ///
     /// Simplified: just check ts_curr - ts_prev is positive when same_addr=1
-    pub fn timestamp_constraint(
-        &self,
-        same_addr: M31,
-        ts_curr: M31,
-        ts_prev: M31,
-    ) -> M31 {
+    pub fn timestamp_constraint(&self, same_addr: M31, ts_curr: M31, ts_prev: M31) -> M31 {
         // When same_addr=1, we need ts_curr > ts_prev
         // This is typically proven via range check, but here we return the difference
         // A full implementation would use a range check argument
@@ -781,7 +776,10 @@ mod tests {
         let result = prover.verify_consistency();
         assert!(result.is_err());
 
-        if let Err(MemoryError::TimestampOrder { prev_ts, curr_ts, .. }) = result {
+        if let Err(MemoryError::TimestampOrder {
+            prev_ts, curr_ts, ..
+        }) = result
+        {
             assert_eq!(prev_ts, 10);
             assert_eq!(curr_ts, 10);
         } else {
@@ -862,95 +860,75 @@ mod tests {
 
     #[test]
     fn test_air_constraints_fingerprint() {
-        let constraints = MemoryAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints =
+            MemoryAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
-        let fp = constraints.fingerprint(
-            M31::new(0x1000),
-            M31::new(42),
-            M31::new(1),
-            M31::ONE,
-        );
+        let fp = constraints.fingerprint(M31::new(0x1000), M31::new(42), M31::new(1), M31::ONE);
 
         // Fingerprint should be non-zero
         assert_ne!(fp, QM31::ZERO);
 
         // Same inputs should give same fingerprint
-        let fp2 = constraints.fingerprint(
-            M31::new(0x1000),
-            M31::new(42),
-            M31::new(1),
-            M31::ONE,
-        );
+        let fp2 = constraints.fingerprint(M31::new(0x1000), M31::new(42), M31::new(1), M31::ONE);
         assert_eq!(fp, fp2);
     }
 
     #[test]
     fn test_consistency_constraint_satisfied() {
-        let constraints = MemoryAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints =
+            MemoryAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
         // Same address, read, same value -> should be 0
         let result = constraints.consistency_constraint(
-            M31::ONE,           // same_addr = 1
-            M31::ONE,           // is_read = 1
-            M31::new(42),       // value_curr
-            M31::new(42),       // value_prev (same)
+            M31::ONE,     // same_addr = 1
+            M31::ONE,     // is_read = 1
+            M31::new(42), // value_curr
+            M31::new(42), // value_prev (same)
         );
         assert_eq!(result, M31::ZERO);
     }
 
     #[test]
     fn test_consistency_constraint_write_ok() {
-        let constraints = MemoryAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints =
+            MemoryAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
         // Same address, write, different value -> should be 0 (write can change)
         let result = constraints.consistency_constraint(
-            M31::ONE,           // same_addr = 1
-            M31::ZERO,          // is_read = 0 (it's a write)
-            M31::new(100),      // value_curr
-            M31::new(42),       // value_prev (different)
+            M31::ONE,      // same_addr = 1
+            M31::ZERO,     // is_read = 0 (it's a write)
+            M31::new(100), // value_curr
+            M31::new(42),  // value_prev (different)
         );
         assert_eq!(result, M31::ZERO);
     }
 
     #[test]
     fn test_consistency_constraint_different_addr() {
-        let constraints = MemoryAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints =
+            MemoryAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
         // Different address -> constraint doesn't apply
         let result = constraints.consistency_constraint(
-            M31::ZERO,          // same_addr = 0
-            M31::ONE,           // is_read = 1
-            M31::new(100),      // value_curr
-            M31::new(42),       // value_prev (different but OK)
+            M31::ZERO,     // same_addr = 0
+            M31::ONE,      // is_read = 1
+            M31::new(100), // value_curr
+            M31::new(42),  // value_prev (different but OK)
         );
         assert_eq!(result, M31::ZERO);
     }
 
     #[test]
     fn test_consistency_constraint_violated() {
-        let constraints = MemoryAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints =
+            MemoryAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
         // Same address, read, different value -> should be non-zero (violation)
         let result = constraints.consistency_constraint(
-            M31::ONE,           // same_addr = 1
-            M31::ONE,           // is_read = 1
-            M31::new(100),      // value_curr
-            M31::new(42),       // value_prev (different!)
+            M31::ONE,      // same_addr = 1
+            M31::ONE,      // is_read = 1
+            M31::new(100), // value_curr
+            M31::new(42),  // value_prev (different!)
         );
         assert_ne!(result, M31::ZERO);
     }

@@ -1,32 +1,45 @@
-//! Fiat-Shamir transcript channel for the prover.
+//! Fiat-Shamir transcript channel for the prover using Plonky3.
 
-use sha2::{Digest, Sha256};
-use zp1_primitives::{M31, QM31};
+use p3_challenger::{CanObserve, CanSample, DuplexChallenger};
+use p3_poseidon2::Poseidon2;
+use zp1_primitives::{M31, QM31, to_p3, from_p3};
+use p3_mersenne_31::{Poseidon2ExternalLayerMersenne31, Poseidon2InternalLayerMersenne31};
+use rand::SeedableRng;
+use rand::rngs::StdRng;
+
+// Poseidon2 configuration: Width 16, M31 field
+type Permutation = Poseidon2<zp1_primitives::P3M31, Poseidon2ExternalLayerMersenne31<16>, Poseidon2InternalLayerMersenne31, 16, 5>;
+type Challenger = DuplexChallenger<zp1_primitives::P3M31, Permutation, 16, 8>;
 
 /// Prover channel for Fiat-Shamir transcript.
 #[derive(Clone)]
 pub struct ProverChannel {
-    /// SHA256 state.
-    hasher: Sha256,
-    /// Transcript bytes for debugging.
-    transcript: Vec<u8>,
+    challenger: Challenger,
 }
 
 impl ProverChannel {
     /// Create a new prover channel.
-    pub fn new(domain_separator: &[u8]) -> Self {
-        let mut ch = Self {
-            hasher: Sha256::new(),
-            transcript: Vec::new(),
-        };
-        ch.absorb(domain_separator);
-        ch
+    pub fn new(_domain_separator: &[u8]) -> Self {
+        // Initialize Poseidon2 permutation
+        let mut rng = StdRng::seed_from_u64(42);
+        let permutation = Poseidon2::new_from_rng_128(&mut rng);
+        let mut challenger = DuplexChallenger::new(permutation);
+        
+        // TODO: Absorb domain separator properly (convert to field elements)
+        // For now we just start fresh
+        Self { challenger }
     }
 
     /// Absorb bytes into the transcript.
     pub fn absorb(&mut self, data: &[u8]) {
-        self.hasher.update(data);
-        self.transcript.extend_from_slice(data);
+        // Naive byte absorption - pack into field elements
+        // In a real implementation, we'd use a proper byte-to-field packing
+        for chunk in data.chunks(4) {
+            let mut bytes = [0u8; 4];
+            bytes[0..chunk.len()].copy_from_slice(chunk);
+            let val = u32::from_le_bytes(bytes) % 2147483647; // M31 modulus
+            self.challenger.observe(to_p3(M31::new(val)));
+        }
     }
 
     /// Absorb a 32-byte commitment.
@@ -36,18 +49,12 @@ impl ProverChannel {
 
     /// Absorb an M31 field element.
     pub fn absorb_felt(&mut self, felt: M31) {
-        self.absorb(&felt.as_u32().to_le_bytes());
+        self.challenger.observe(to_p3(felt));
     }
 
     /// Squeeze a challenge in M31.
     pub fn squeeze_challenge(&mut self) -> M31 {
-        let hash = self.hasher.clone().finalize();
-        self.hasher.update(&hash);
-
-        // Take first 4 bytes, reduce mod P
-        let bytes: [u8; 4] = hash[0..4].try_into().unwrap();
-        let val = u32::from_le_bytes(bytes);
-        M31::new(val % M31::P)
+        from_p3(self.challenger.sample())
     }
 
     /// Squeeze a challenge in QM31 (extension field).
@@ -67,27 +74,11 @@ impl ProverChannel {
     /// Squeeze n query indices in range [0, domain_size).
     pub fn squeeze_query_indices(&mut self, n: usize, domain_size: usize) -> Vec<usize> {
         let mut indices = Vec::with_capacity(n);
-        while indices.len() < n {
-            let hash = self.hasher.clone().finalize();
-            self.hasher.update(&hash);
-
-            // Extract multiple indices from each hash
-            for chunk in hash.chunks(4) {
-                if indices.len() >= n {
-                    break;
-                }
-                let bytes: [u8; 4] = chunk.try_into().unwrap();
-                let val = u32::from_le_bytes(bytes) as usize;
-                indices.push(val % domain_size);
-            }
+        for _ in 0..n {
+            let val = self.squeeze_challenge().value() as usize;
+            indices.push(val % domain_size);
         }
-        indices.truncate(n);
         indices
-    }
-
-    /// Get the current transcript length.
-    pub fn transcript_len(&self) -> usize {
-        self.transcript.len()
     }
 }
 

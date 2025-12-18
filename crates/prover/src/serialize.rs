@@ -2,7 +2,7 @@
 //!
 //! Provides serialization/deserialization for proofs and verification keys.
 
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use zp1_primitives::M31;
 
 /// Serialize M31 as u32.
@@ -23,7 +23,9 @@ pub fn serialize_m31_vec<S: Serializer>(vals: &[M31], serializer: S) -> Result<S
 }
 
 /// Deserialize Vec<M31> from Vec<u32>.
-pub fn deserialize_m31_vec<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<M31>, D::Error> {
+pub fn deserialize_m31_vec<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<M31>, D::Error> {
     let u32_vals: Vec<u32> = Vec::deserialize(deserializer)?;
     Ok(u32_vals.into_iter().map(M31::new).collect())
 }
@@ -34,22 +36,25 @@ pub struct SerializableProof {
     /// Trace commitment (Merkle root).
     #[serde(with = "hex_array")]
     pub trace_commitment: [u8; 32],
-    
+
     /// Composition polynomial commitment.
     #[serde(with = "hex_array")]
     pub composition_commitment: [u8; 32],
-    
+
     /// FRI layer commitments.
     #[serde(with = "hex_vec")]
     pub fri_commitments: Vec<[u8; 32]>,
-    
+
     /// FRI final polynomial coefficients.
-    #[serde(serialize_with = "serialize_m31_vec", deserialize_with = "deserialize_m31_vec")]
+    #[serde(
+        serialize_with = "serialize_m31_vec",
+        deserialize_with = "deserialize_m31_vec"
+    )]
     pub fri_final_poly: Vec<M31>,
-    
+
     /// Query proofs.
     pub query_proofs: Vec<SerializableQueryProof>,
-    
+
     /// Configuration used for this proof.
     pub config: ProofConfig,
 }
@@ -59,20 +64,26 @@ pub struct SerializableProof {
 pub struct SerializableQueryProof {
     /// Query index in the domain.
     pub index: usize,
-    
+
     /// Trace values at query point.
-    #[serde(serialize_with = "serialize_m31_vec", deserialize_with = "deserialize_m31_vec")]
+    #[serde(
+        serialize_with = "serialize_m31_vec",
+        deserialize_with = "deserialize_m31_vec"
+    )]
     pub trace_values: Vec<M31>,
-    
+
     /// Composition value at query point.
     #[serde(serialize_with = "serialize_m31", deserialize_with = "deserialize_m31")]
     pub composition_value: M31,
-    
+
     /// Merkle authentication paths.
     pub merkle_paths: Vec<MerklePath>,
-    
+
     /// FRI layer values.
-    #[serde(serialize_with = "serialize_m31_vec", deserialize_with = "deserialize_m31_vec")]
+    #[serde(
+        serialize_with = "serialize_m31_vec",
+        deserialize_with = "deserialize_m31_vec"
+    )]
     pub fri_values: Vec<M31>,
 }
 
@@ -116,13 +127,13 @@ pub struct VerificationKey {
 
 /// Hex serialization for fixed-size arrays.
 mod hex_array {
-    use serde::{Serializer, Deserializer, Deserialize};
     use super::hex;
-    
+    use serde::{Deserialize, Deserializer, Serializer};
+
     pub fn serialize<S: Serializer>(bytes: &[u8; 32], serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(&hex::encode(bytes))
     }
-    
+
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<[u8; 32], D::Error> {
         let s = String::deserialize(deserializer)?;
         let bytes = hex::decode(&s).map_err(serde::de::Error::custom)?;
@@ -137,15 +148,17 @@ mod hex_array {
 
 /// Hex serialization for vectors of fixed-size arrays.
 mod hex_vec {
-    use serde::{Serialize, Serializer, Deserializer, Deserialize};
     use super::hex;
-    
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
     pub fn serialize<S: Serializer>(bytes: &[[u8; 32]], serializer: S) -> Result<S::Ok, S::Error> {
         let strs: Vec<String> = bytes.iter().map(|b| hex::encode(b)).collect();
         strs.serialize(serializer)
     }
-    
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<[u8; 32]>, D::Error> {
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<[u8; 32]>, D::Error> {
         let strs: Vec<String> = Vec::deserialize(deserializer)?;
         strs.into_iter()
             .map(|s| {
@@ -166,7 +179,7 @@ pub mod hex {
     pub fn encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }
-    
+
     pub fn decode(s: &str) -> Result<Vec<u8>, String> {
         if s.len() % 2 != 0 {
             return Err("Odd length hex string".into());
@@ -183,25 +196,25 @@ impl SerializableProof {
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
-    
+
     /// Deserialize from JSON.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
     }
-    
+
     /// Serialize to binary (bincode).
     pub fn to_bytes(&self) -> Vec<u8> {
         // Simple binary format: JSON for now
         // In production, use proper binary encoding
         self.to_json().unwrap_or_default().into_bytes()
     }
-    
+
     /// Deserialize from binary.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
         let json = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
         Self::from_json(json).map_err(|e| e.to_string())
     }
-    
+
     /// Get proof size in bytes.
     pub fn size(&self) -> usize {
         self.to_bytes().len()
@@ -213,7 +226,7 @@ impl VerificationKey {
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
         serde_json::to_string_pretty(self)
     }
-    
+
     /// Deserialize from JSON.
     pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(json)
@@ -234,24 +247,25 @@ mod tests {
             security_bits: 100,
             entry_point: 0x0,
         };
-        
+
         let json = serde_json::to_string(&config).unwrap();
         let parsed: ProofConfig = serde_json::from_str(&json).unwrap();
-        
+
         assert_eq!(parsed.log_trace_len, 10);
         assert_eq!(parsed.security_bits, 100);
     }
 
     #[test]
     fn test_hex_roundtrip() {
-        let bytes = [0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
-                     0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
-                     0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89,
-                     0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89];
-        
+        let bytes = [
+            0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45,
+            0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01,
+            0x23, 0x45, 0x67, 0x89,
+        ];
+
         let encoded = hex::encode(&bytes);
         let decoded = hex::decode(&encoded).unwrap();
-        
+
         assert_eq!(decoded, bytes.to_vec());
     }
 
@@ -269,10 +283,10 @@ mod tests {
             constraints_hash: [1u8; 32],
             public_inputs_hash: [2u8; 32],
         };
-        
+
         let json = vk.to_json().unwrap();
         let parsed = VerificationKey::from_json(&json).unwrap();
-        
+
         assert_eq!(parsed.config.log_trace_len, 12);
         assert_eq!(parsed.constraints_hash, [1u8; 32]);
     }

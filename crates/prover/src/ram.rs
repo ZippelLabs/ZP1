@@ -496,7 +496,8 @@ impl RamArgumentProver {
     /// - Sum of init fingerprints = Sum of final fingerprints (with chunk linking)
     pub fn verify_shuffle2(&self) -> bool {
         let (init_tuples, final_tuples) = self.extract_init_final();
-        let (init_fps, final_fps) = self.compute_init_final_fingerprints(&init_tuples, &final_tuples);
+        let (init_fps, final_fps) =
+            self.compute_init_final_fingerprints(&init_tuples, &final_tuples);
 
         // For single chunk or complete execution, init and final should balance
         // In multi-chunk setting, would need to link across chunks
@@ -602,7 +603,11 @@ pub struct RamProof {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RamError {
     /// Timestamp ordering violation
-    TimestampOrder { address: u32, prev_ts: u64, curr_ts: u64 },
+    TimestampOrder {
+        address: u32,
+        prev_ts: u64,
+        curr_ts: u64,
+    },
     /// Read value mismatch
     ReadMismatch {
         address: u32,
@@ -787,13 +792,7 @@ impl RamAirConstraints {
     }
 
     /// Compute fingerprint for a RAM tuple.
-    pub fn fingerprint(
-        &self,
-        address: M31,
-        value: M31,
-        timestamp: M31,
-        op: M31,
-    ) -> QM31 {
+    pub fn fingerprint(&self, address: M31, value: M31, timestamp: M31, op: M31) -> QM31 {
         let addr = QM31::from(address);
         let val = QM31::from(value);
         let ts = QM31::from(timestamp);
@@ -1096,26 +1095,23 @@ mod tests {
 
     #[test]
     fn test_air_constraints() {
-        let constraints = RamAirConstraints::new(
-            QM31::from(M31::new(5)),
-            QM31::from(M31::new(7)),
-        );
+        let constraints = RamAirConstraints::new(QM31::from(M31::new(5)), QM31::from(M31::new(7)));
 
         // Consistency constraint: same addr, read, same value -> 0
         let result = constraints.consistency_constraint(
-            M31::ONE,       // same_addr
-            M31::ONE,       // is_read
-            M31::new(42),   // value_curr
-            M31::new(42),   // value_prev
+            M31::ONE,     // same_addr
+            M31::ONE,     // is_read
+            M31::new(42), // value_curr
+            M31::new(42), // value_prev
         );
         assert_eq!(result, M31::ZERO);
 
         // Consistency constraint: same addr, read, different value -> non-zero
         let result = constraints.consistency_constraint(
-            M31::ONE,       // same_addr
-            M31::ONE,       // is_read
-            M31::new(100),  // value_curr
-            M31::new(42),   // value_prev
+            M31::ONE,      // same_addr
+            M31::ONE,      // is_read
+            M31::new(100), // value_curr
+            M31::new(42),  // value_prev
         );
         assert_ne!(result, M31::ZERO);
     }

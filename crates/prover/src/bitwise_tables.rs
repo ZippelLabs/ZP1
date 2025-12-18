@@ -34,7 +34,7 @@ impl BitwiseLookupTables {
         let mut and_values = Vec::with_capacity(size);
         let mut or_values = Vec::with_capacity(size);
         let mut xor_values = Vec::with_capacity(size);
-        
+
         for a in 0u32..256 {
             for b in 0u32..256 {
                 and_values.push(M31::new(a & b));
@@ -42,7 +42,7 @@ impl BitwiseLookupTables {
                 xor_values.push(M31::new(a ^ b));
             }
         }
-        
+
         Self {
             and_values,
             or_values,
@@ -52,7 +52,7 @@ impl BitwiseLookupTables {
             xor_mult: vec![0; size],
         }
     }
-    
+
     /// Look up 8-bit AND: returns a & b and increments multiplicity
     #[inline]
     pub fn and8(&mut self, a: u8, b: u8) -> M31 {
@@ -60,7 +60,7 @@ impl BitwiseLookupTables {
         self.and_mult[idx] += 1;
         self.and_values[idx]
     }
-    
+
     /// Look up 8-bit OR: returns a | b and increments multiplicity
     #[inline]
     pub fn or8(&mut self, a: u8, b: u8) -> M31 {
@@ -68,7 +68,7 @@ impl BitwiseLookupTables {
         self.or_mult[idx] += 1;
         self.or_values[idx]
     }
-    
+
     /// Look up 8-bit XOR: returns a ^ b and increments multiplicity
     #[inline]
     pub fn xor8(&mut self, a: u8, b: u8) -> M31 {
@@ -76,7 +76,7 @@ impl BitwiseLookupTables {
         self.xor_mult[idx] += 1;
         self.xor_values[idx]
     }
-    
+
     /// Perform 32-bit AND using 4 byte-wise lookups.
     pub fn and32(&mut self, a: u32, b: u32) -> u32 {
         let mut result = 0u32;
@@ -88,7 +88,7 @@ impl BitwiseLookupTables {
         }
         result
     }
-    
+
     /// Perform 32-bit OR using 4 byte-wise lookups.
     pub fn or32(&mut self, a: u32, b: u32) -> u32 {
         let mut result = 0u32;
@@ -100,7 +100,7 @@ impl BitwiseLookupTables {
         }
         result
     }
-    
+
     /// Perform 32-bit XOR using 4 byte-wise lookups.
     pub fn xor32(&mut self, a: u32, b: u32) -> u32 {
         let mut result = 0u32;
@@ -112,12 +112,12 @@ impl BitwiseLookupTables {
         }
         result
     }
-    
+
     /// Get multiplicities for LogUp proof generation.
     pub fn get_multiplicities(&self) -> (&[u32], &[u32], &[u32]) {
         (&self.and_mult, &self.or_mult, &self.xor_mult)
     }
-    
+
     /// Get table values for LogUp proof generation.
     pub fn get_values(&self) -> (&[M31], &[M31], &[M31]) {
         (&self.and_values, &self.or_values, &self.xor_values)
@@ -133,55 +133,55 @@ impl Default for BitwiseLookupTables {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_and() {
         let mut tables = BitwiseLookupTables::new();
-        
-        assert_eq!(tables.and8(0, 0), M31::new(0));         // 0 & 0 = 0
-        assert_eq!(tables.and8(255, 255), M31::new(255));   // 0xFF & 0xFF = 0xFF
-        assert_eq!(tables.and8(0xAA, 0x55), M31::new(0));   // 0xAA & 0x55 = 0
+
+        assert_eq!(tables.and8(0, 0), M31::new(0)); // 0 & 0 = 0
+        assert_eq!(tables.and8(255, 255), M31::new(255)); // 0xFF & 0xFF = 0xFF
+        assert_eq!(tables.and8(0xAA, 0x55), M31::new(0)); // 0xAA & 0x55 = 0
     }
-    
+
     #[test]
     fn test_or() {
         let mut tables = BitwiseLookupTables::new();
-        
-        assert_eq!(tables.or8(0, 0), M31::new(0));          // 0 | 0 = 0
-        assert_eq!(tables.or8(0xAA, 0x55), M31::new(255));  // 0xAA | 0x55 = 0xFF
+
+        assert_eq!(tables.or8(0, 0), M31::new(0)); // 0 | 0 = 0
+        assert_eq!(tables.or8(0xAA, 0x55), M31::new(255)); // 0xAA | 0x55 = 0xFF
     }
-    
+
     #[test]
     fn test_xor() {
         let mut tables = BitwiseLookupTables::new();
-        
-        assert_eq!(tables.xor8(0xFF, 0xFF), M31::new(0));   // 0xFF ^ 0xFF = 0
+
+        assert_eq!(tables.xor8(0xFF, 0xFF), M31::new(0)); // 0xFF ^ 0xFF = 0
         assert_eq!(tables.xor8(0xAA, 0x55), M31::new(255)); // 0xAA ^ 0x55 = 0xFF
     }
-    
+
     #[test]
     fn test_bitwise_32bit() {
         let mut tables = BitwiseLookupTables::new();
-        
+
         let a = 0xDEADBEEF_u32;
         let b = 0xCAFEBABE_u32;
-        
+
         assert_eq!(tables.and32(a, b), a & b);
         assert_eq!(tables.or32(a, b), a | b);
         assert_eq!(tables.xor32(a, b), a ^ b);
     }
-    
+
     #[test]
     fn test_multiplicity_tracking() {
         let mut tables = BitwiseLookupTables::new();
-        
+
         // Perform some lookups
         tables.and8(0x12, 0x34);
-        tables.and8(0x12, 0x34);  // Same lookup twice
-        
+        tables.and8(0x12, 0x34); // Same lookup twice
+
         let (and_mult, _, _) = tables.get_multiplicities();
         let idx = 0x12 * 256 + 0x34;
-        
+
         // Should have been looked up twice
         assert_eq!(and_mult[idx], 2);
     }
