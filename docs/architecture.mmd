@@ -1,0 +1,20 @@
+flowchart TD
+    A[Rust Source] -->|cargo build| B[RISC-V ELF]
+    B -->|Load| C[Executor]
+    
+    subgraph VM[VM Execution]
+        C -->|Execute| D[Execution Trace]
+        C -->|Syscall| E[Delegation Core]
+        E -->|Output| F[Chip Tables]
+    end
+    
+    D -->|Commit| G[STARK Prover]
+    F -->|Commit| G
+    
+    subgraph PV[Prover Core]
+        G -->|Trace Commitment| H[Merkle Tree]
+        G -->|AIR Constraints| I[Quotient Poly]
+        I -->|FRI Protocol| J[STARK Proof]
+    end
+    
+    J -->|Verify| K[Verifier]
