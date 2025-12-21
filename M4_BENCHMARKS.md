@@ -249,7 +249,7 @@ Based on our benchmarks, rough estimates for proving a ~15M gas Ethereum block:
 ### Bottlenecks Identified
 
 1. **CircleFFT IFFT**: Slow at 2^12+ sizes (needs optimization)
-2. **GPU Transfer Overhead**: M4's Metal GPU slower than CPU for small NTT
+2. **GPU Transfer Overhead**: M4's Metal GPU is slower than the CPU for small NTT
 3. **No Recursion**: Single-threaded proving without parallelization
 
 ### Optimization Roadmap
