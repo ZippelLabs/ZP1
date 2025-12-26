@@ -32,7 +32,11 @@ impl M31 {
     /// Create a new M31 element, reducing if necessary.
     #[inline]
     pub const fn new(val: u32) -> Self {
+        // Apply double reduction to handle values >= 2*P
+        // First reduction: if val >= P, subtract P
         let reduced = if val >= P { val - P } else { val };
+        // Second reduction: if still >= P, subtract P again
+        let reduced = if reduced >= P { reduced - P } else { reduced };
         Self(reduced)
     }
 
@@ -292,5 +296,47 @@ mod tests {
         assert_eq!((a + neg_a).as_u32(), 0);
 
         assert_eq!((-M31::ZERO).as_u32(), 0);
+    }
+
+    /// Proof of Concept test demonstrating the bug in M31::new()
+    /// 
+    /// This test verifies that `new()` correctly reduces values >= 2*P.
+    /// The original implementation only performed a single reduction step,
+    /// which failed for values >= 2*P (values >= 2^32 - 2).
+    #[test]
+    fn test_new_reduction_bug_poc() {
+        const TWO_P: u32 = 2 * P;
+        
+        // Test Case 1: val = 2*P = 2^32 - 2
+        // Expected: 2*P mod P = 0
+        let m1 = M31::new(TWO_P);
+        assert_eq!(m1.as_u32(), 0, "M31::new(2*P) should be 0");
+
+        // Test Case 2: val = u32::MAX = 2^32 - 1
+        // Expected: (2^32 - 1) mod (2^31 - 1) = 1
+        let m2 = M31::new(u32::MAX);
+        assert_eq!(m2.as_u32(), 1, "M31::new(u32::MAX) should be 1");
+    }
+
+    /// Additional edge case tests for M31::new()
+    #[test]
+    fn test_new_edge_cases() {
+        const TWO_P: u32 = 2 * P;
+        
+        // Basic values
+        assert_eq!(M31::new(0).as_u32(), 0);
+        assert_eq!(M31::new(1).as_u32(), 1);
+        assert_eq!(M31::new(P - 1).as_u32(), P - 1);
+        
+        // Values at P boundary
+        assert_eq!(M31::new(P).as_u32(), 0);
+        assert_eq!(M31::new(P + 1).as_u32(), 1);
+        
+        // Values at 2*P boundary
+        assert_eq!(M31::new(TWO_P - 1).as_u32(), P - 1);
+        assert_eq!(M31::new(TWO_P).as_u32(), 0);
+        
+        // Maximum value
+        assert_eq!(M31::new(u32::MAX).as_u32(), 1);
     }
 }
