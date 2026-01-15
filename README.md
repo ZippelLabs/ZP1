@@ -8,8 +8,8 @@ A zero-knowledge virtual machine for RISC-V programs using Circle STARKs over Me
 
 ```bash
 # Install
-git clone https://github.com/this-vishalsingh/zp1
-cd zp1
+git clone https://github.com/ZippelLabs/ZP1
+cd ZP1
 cargo build --release
 
 # Run tests
