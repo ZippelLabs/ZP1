@@ -66,7 +66,7 @@ Circle STARK prover for RISC-V RV32IM over Mersenne31 ($p = 2^{31} - 1$).
 ## Prover Pipeline
 1. Trace ingestion
 2. Low-degree extension (Circle FFT)
-3. Constraint evaluation over domain
+3. Constraint evaluation over the domain
 4. DEEP composition polynomial
 5. FRI folding + Merkle commitments
 6. Query openings
