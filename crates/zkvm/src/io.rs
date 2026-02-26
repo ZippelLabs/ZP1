@@ -102,14 +102,13 @@ pub fn read<T: for<'de> Deserialize<'de>>() -> T {
 ///
 /// # Returns
 ///
-/// A tuple containing:
-/// - Slice of the read data
-/// - Number of bytes read
+/// Number of bytes read into the provided buffer.
 ///
 /// # Example
 ///
 /// ```rust,ignore
-/// let (data, len) = read_slice();
+/// let mut buffer = [0u8; 1024];
+/// let len = read_slice(&mut buffer);
 /// ```
 #[cfg(target_arch = "riscv32")]
 pub fn read_slice(buffer: &mut [u8]) -> usize {
