@@ -8,6 +8,7 @@ license.workspace = true
 bytemuck = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true }
+rayon = { workspace = true }
 
 # Plonky3 SIMD-optimized primitives
 p3-field = { workspace = true }

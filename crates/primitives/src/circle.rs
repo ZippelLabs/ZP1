@@ -33,6 +33,9 @@
 //! - Stwo prover implementation
 
 use crate::field::M31;
+use crate::p3_interop::{from_p3, to_p3, P3M31};
+use p3_field::{Field, PackedValue};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 // ============================================================================
@@ -789,13 +792,179 @@ fn batch_inverse(values: &[M31]) -> Vec<M31> {
 pub struct FastCircleFFT {
     /// Precomputed twiddle factors.
     twiddles: CircleTwiddles,
+    /// Twiddle factors converted to Plonky3 Mersenne31 for packed SIMD path.
+    twiddles_p3: Vec<Vec<P3M31>>,
+    /// Inverse twiddle factors converted to Plonky3 Mersenne31 for packed SIMD path.
+    itwiddles_p3: Vec<Vec<P3M31>>,
+}
+
+const PARALLEL_LAYER_MIN_SIZE: usize = 1 << 12;
+const SIMD_PATH_MIN_SIZE: usize = 1 << 8;
+
+#[inline]
+fn should_parallelize(n: usize, num_blocks: usize) -> bool {
+    n >= PARALLEL_LAYER_MIN_SIZE && num_blocks > 1
+}
+
+#[inline]
+fn packed_width_p3() -> usize {
+    <<P3M31 as Field>::Packing as PackedValue>::WIDTH
+}
+
+#[inline]
+fn should_use_simd(n: usize) -> bool {
+    packed_width_p3() > 1 && n >= SIMD_PATH_MIN_SIZE
+}
+
+fn forward_layer_m31(values: &mut [M31], twids: &[M31], half_block: usize) {
+    let block_size = half_block * 2;
+    debug_assert_eq!(values.len(), twids.len() * block_size);
+
+    if should_parallelize(values.len(), twids.len()) {
+        values
+            .par_chunks_mut(block_size)
+            .zip(twids.par_iter().copied())
+            .for_each(|(chunk, t)| {
+                let (lo, hi) = chunk.split_at_mut(half_block);
+                for i in 0..half_block {
+                    let tmp = hi[i] * t;
+                    hi[i] = lo[i] - tmp;
+                    lo[i] = lo[i] + tmp;
+                }
+            });
+    } else {
+        for (chunk, &t) in values.chunks_mut(block_size).zip(twids.iter()) {
+            let (lo, hi) = chunk.split_at_mut(half_block);
+            for i in 0..half_block {
+                let tmp = hi[i] * t;
+                hi[i] = lo[i] - tmp;
+                lo[i] = lo[i] + tmp;
+            }
+        }
+    }
+}
+
+fn inverse_layer_m31(values: &mut [M31], itwids: &[M31], half_block: usize) {
+    let block_size = half_block * 2;
+    debug_assert_eq!(values.len(), itwids.len() * block_size);
+
+    if should_parallelize(values.len(), itwids.len()) {
+        values
+            .par_chunks_mut(block_size)
+            .zip(itwids.par_iter().copied())
+            .for_each(|(chunk, it)| {
+                let (lo, hi) = chunk.split_at_mut(half_block);
+                for i in 0..half_block {
+                    let tmp = lo[i];
+                    lo[i] = tmp + hi[i];
+                    hi[i] = (tmp - hi[i]) * it;
+                }
+            });
+    } else {
+        for (chunk, &it) in values.chunks_mut(block_size).zip(itwids.iter()) {
+            let (lo, hi) = chunk.split_at_mut(half_block);
+            for i in 0..half_block {
+                let tmp = lo[i];
+                lo[i] = tmp + hi[i];
+                hi[i] = (tmp - hi[i]) * it;
+            }
+        }
+    }
+}
+
+#[inline]
+fn dit_block_p3(lo: &mut [P3M31], hi: &mut [P3M31], twid: P3M31) {
+    debug_assert_eq!(lo.len(), hi.len());
+
+    let (lo_packed, lo_suffix) = <P3M31 as Field>::Packing::pack_slice_with_suffix_mut(lo);
+    let (hi_packed, hi_suffix) = <P3M31 as Field>::Packing::pack_slice_with_suffix_mut(hi);
+
+    for (a, b) in lo_packed.iter_mut().zip(hi_packed.iter_mut()) {
+        let tmp = *b * twid;
+        *b = *a - tmp;
+        *a = *a + tmp;
+    }
+    for (a, b) in lo_suffix.iter_mut().zip(hi_suffix.iter_mut()) {
+        let tmp = *b * twid;
+        *b = *a - tmp;
+        *a = *a + tmp;
+    }
+}
+
+#[inline]
+fn idit_block_p3(lo: &mut [P3M31], hi: &mut [P3M31], itwid: P3M31) {
+    debug_assert_eq!(lo.len(), hi.len());
+
+    let (lo_packed, lo_suffix) = <P3M31 as Field>::Packing::pack_slice_with_suffix_mut(lo);
+    let (hi_packed, hi_suffix) = <P3M31 as Field>::Packing::pack_slice_with_suffix_mut(hi);
+
+    for (a, b) in lo_packed.iter_mut().zip(hi_packed.iter_mut()) {
+        let tmp = *a;
+        *a = tmp + *b;
+        *b = (tmp - *b) * itwid;
+    }
+    for (a, b) in lo_suffix.iter_mut().zip(hi_suffix.iter_mut()) {
+        let tmp = *a;
+        *a = tmp + *b;
+        *b = (tmp - *b) * itwid;
+    }
+}
+
+fn forward_layer_p3(values: &mut [P3M31], twids: &[P3M31], half_block: usize) {
+    let block_size = half_block * 2;
+    debug_assert_eq!(values.len(), twids.len() * block_size);
+
+    if should_parallelize(values.len(), twids.len()) {
+        values
+            .par_chunks_mut(block_size)
+            .zip(twids.par_iter().copied())
+            .for_each(|(chunk, t)| {
+                let (lo, hi) = chunk.split_at_mut(half_block);
+                dit_block_p3(lo, hi, t);
+            });
+    } else {
+        for (chunk, &t) in values.chunks_mut(block_size).zip(twids.iter()) {
+            let (lo, hi) = chunk.split_at_mut(half_block);
+            dit_block_p3(lo, hi, t);
+        }
+    }
+}
+
+fn inverse_layer_p3(values: &mut [P3M31], itwids: &[P3M31], half_block: usize) {
+    let block_size = half_block * 2;
+    debug_assert_eq!(values.len(), itwids.len() * block_size);
+
+    if should_parallelize(values.len(), itwids.len()) {
+        values
+            .par_chunks_mut(block_size)
+            .zip(itwids.par_iter().copied())
+            .for_each(|(chunk, it)| {
+                let (lo, hi) = chunk.split_at_mut(half_block);
+                idit_block_p3(lo, hi, it);
+            });
+    } else {
+        for (chunk, &it) in values.chunks_mut(block_size).zip(itwids.iter()) {
+            let (lo, hi) = chunk.split_at_mut(half_block);
+            idit_block_p3(lo, hi, it);
+        }
+    }
 }
 
 impl FastCircleFFT {
     /// Create a Fast Circle FFT for domain size 2^log_size.
     pub fn new(log_size: usize) -> Self {
         let twiddles = CircleTwiddles::new(log_size);
-        Self { twiddles }
+        let twiddles_p3 = twiddles
+            .twiddles
+            .iter()
+            .map(|layer| layer.iter().copied().map(to_p3).collect())
+            .collect();
+        let itwiddles_p3 = twiddles
+            .itwiddles
+            .iter()
+            .map(|layer| layer.iter().copied().map(to_p3).collect())
+            .collect();
+        Self { twiddles, twiddles_p3, itwiddles_p3 }
     }
 
     /// Forward FFT (evaluation): circle-basis coefficients → evaluations on coset domain.
@@ -807,6 +976,15 @@ impl FastCircleFFT {
     /// 1. Line layers (log_n-1 down to 1): x-coordinate butterflies
     /// 2. Circle layer (0): y-coordinate butterflies
     pub fn fft(&self, coeffs: &[M31]) -> Vec<M31> {
+        let n = self.size();
+        if should_use_simd(n) {
+            self.fft_packed_simd(coeffs)
+        } else {
+            self.fft_scalar_parallel(coeffs)
+        }
+    }
+
+    fn fft_scalar_parallel(&self, coeffs: &[M31]) -> Vec<M31> {
         let log_n = self.twiddles.log_size;
         if log_n == 0 {
             return if coeffs.is_empty() { vec![M31::ZERO] } else { vec![coeffs[0]] };
@@ -824,36 +1002,34 @@ impl FastCircleFFT {
         //
         // Line layers: k = log_n-1 down to 1 (x-coordinate twiddles)
         for layer in (1..log_n).rev() {
-            let twids = &self.twiddles.twiddles[layer];
-            let half_block = 1usize << layer;
-            let block_size = half_block * 2;
-
-            for (h, &t) in twids.iter().enumerate() {
-                let base = h * block_size;
-                for l in 0..half_block {
-                    let idx0 = base + l;
-                    let idx1 = idx0 + half_block;
-                    let tmp = values[idx1] * t;
-                    values[idx1] = values[idx0] - tmp;
-                    values[idx0] = values[idx0] + tmp;
-                }
-            }
+            forward_layer_m31(&mut values, &self.twiddles.twiddles[layer], 1usize << layer);
         }
 
         // Circle layer (layer 0): y-coordinate twiddles
-        // half_block = 1, block_size = 2, operates on pairs (2h, 2h+1)
-        {
-            let twids = &self.twiddles.twiddles[0];
-            for (h, &t) in twids.iter().enumerate() {
-                let idx0 = 2 * h;
-                let idx1 = idx0 + 1;
-                let tmp = values[idx1] * t;
-                values[idx1] = values[idx0] - tmp;
-                values[idx0] = values[idx0] + tmp;
-            }
-        }
+        forward_layer_m31(&mut values, &self.twiddles.twiddles[0], 1);
 
         values
+    }
+
+    fn fft_packed_simd(&self, coeffs: &[M31]) -> Vec<M31> {
+        let log_n = self.twiddles.log_size;
+        if log_n == 0 {
+            return if coeffs.is_empty() { vec![M31::ZERO] } else { vec![coeffs[0]] };
+        }
+
+        let n = 1usize << log_n;
+        let mut values = vec![to_p3(M31::ZERO); n];
+        let copy_len = coeffs.len().min(n);
+        for i in 0..copy_len {
+            values[i] = to_p3(coeffs[i]);
+        }
+
+        for layer in (1..log_n).rev() {
+            forward_layer_p3(&mut values, &self.twiddles_p3[layer], 1usize << layer);
+        }
+        forward_layer_p3(&mut values, &self.twiddles_p3[0], 1);
+
+        values.into_iter().map(from_p3).collect()
     }
 
     /// Inverse FFT (interpolation): evaluations → circle-basis coefficients.
@@ -866,6 +1042,15 @@ impl FastCircleFFT {
     /// 2. Line layers (1 up to log_n-1): x-coordinate inverse butterflies
     /// 3. Normalize by 1/N
     pub fn ifft(&self, evals: &[M31]) -> Vec<M31> {
+        let n = self.size();
+        if should_use_simd(n) {
+            self.ifft_packed_simd(evals)
+        } else {
+            self.ifft_scalar_parallel(evals)
+        }
+    }
+
+    fn ifft_scalar_parallel(&self, evals: &[M31]) -> Vec<M31> {
         let log_n = self.twiddles.log_size;
         if log_n == 0 {
             return evals.to_vec();
@@ -880,42 +1065,52 @@ impl FastCircleFFT {
         // Layer k has half_block = 2^k, block_size = 2^{k+1}, num_twiddles = N/2^{k+1}
 
         // Circle layer (layer 0): y-coordinate inverse twiddles on pairs (2h, 2h+1)
-        {
-            let itwids = &self.twiddles.itwiddles[0];
-            for (h, &it) in itwids.iter().enumerate() {
-                let idx0 = 2 * h;
-                let idx1 = idx0 + 1;
-                let tmp = values[idx0];
-                values[idx0] = tmp + values[idx1];
-                values[idx1] = (tmp - values[idx1]) * it;
-            }
-        }
+        inverse_layer_m31(&mut values, &self.twiddles.itwiddles[0], 1);
 
         // Line layers: k = 1 up to log_n-1 (x-coordinate inverse twiddles)
         for layer in 1..log_n {
-            let itwids = &self.twiddles.itwiddles[layer];
-            let half_block = 1usize << layer;
-            let block_size = half_block * 2;
-
-            for (h, &it) in itwids.iter().enumerate() {
-                let base = h * block_size;
-                for l in 0..half_block {
-                    let idx0 = base + l;
-                    let idx1 = idx0 + half_block;
-                    let tmp = values[idx0];
-                    values[idx0] = tmp + values[idx1];
-                    values[idx1] = (tmp - values[idx1]) * it;
-                }
-            }
+            inverse_layer_m31(&mut values, &self.twiddles.itwiddles[layer], 1usize << layer);
         }
 
         // Normalize by 1/N
         let n_inv = M31::new(n as u32).inv();
-        for v in &mut values {
-            *v = *v * n_inv;
+        if should_parallelize(n, n) {
+            values.par_iter_mut().for_each(|v| *v = *v * n_inv);
+        } else {
+            for v in &mut values {
+                *v = *v * n_inv;
+            }
         }
 
         values
+    }
+
+    fn ifft_packed_simd(&self, evals: &[M31]) -> Vec<M31> {
+        let log_n = self.twiddles.log_size;
+        if log_n == 0 {
+            return evals.to_vec();
+        }
+
+        let n = 1usize << log_n;
+        assert_eq!(evals.len(), n, "Evaluation count must match domain size");
+
+        let mut values: Vec<P3M31> = evals.iter().copied().map(to_p3).collect();
+
+        inverse_layer_p3(&mut values, &self.itwiddles_p3[0], 1);
+        for layer in 1..log_n {
+            inverse_layer_p3(&mut values, &self.itwiddles_p3[layer], 1usize << layer);
+        }
+
+        let n_inv = to_p3(M31::new(n as u32).inv());
+        if should_parallelize(n, n) {
+            values.par_iter_mut().for_each(|v| *v = *v * n_inv);
+        } else {
+            for v in &mut values {
+                *v = *v * n_inv;
+            }
+        }
+
+        values.into_iter().map(from_p3).collect()
     }
 
     /// Low-degree extension: extend evaluations to a larger domain.
@@ -1555,6 +1750,32 @@ mod tests {
                     i, log_size, recovered[i].value(), coeffs[i].value()
                 );
             }
+        }
+    }
+
+    #[test]
+    fn test_fast_fft_scalar_and_packed_paths_match() {
+        for log_size in 2..=8 {
+            let fft = FastCircleFFT::new(log_size);
+            let n = 1usize << log_size;
+            let coeffs: Vec<M31> =
+                (0..n).map(|i| M31::new((i * 19 + 7) as u32 % 1_000_000)).collect();
+
+            let evals_scalar = fft.fft_scalar_parallel(&coeffs);
+            let evals_packed = fft.fft_packed_simd(&coeffs);
+            assert_eq!(
+                evals_scalar, evals_packed,
+                "FFT path mismatch for log_size {}",
+                log_size
+            );
+
+            let recovered_scalar = fft.ifft_scalar_parallel(&evals_scalar);
+            let recovered_packed = fft.ifft_packed_simd(&evals_scalar);
+            assert_eq!(
+                recovered_scalar, recovered_packed,
+                "IFFT path mismatch for log_size {}",
+                log_size
+            );
         }
     }
 
