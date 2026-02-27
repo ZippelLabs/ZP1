@@ -314,6 +314,31 @@ impl CircleDomain {
         self.points.iter().all(|p| p.is_valid())
     }
     
+    /// Create a circle domain in canonic (circle-bit-reversed) order.
+    ///
+    /// In canonic order, points at indices i and i + N/2 are conjugates:
+    /// they share the same x-coordinate but have opposite y-coordinates.
+    /// This structure is required for correct Circle FFT butterfly decomposition.
+    pub fn new_canonic(log_size: usize) -> Self {
+        assert!(log_size <= 31, "Domain size exceeds circle group order");
+
+        let size = 1usize << log_size;
+        let generator = CirclePoint::generator(log_size);
+
+        // Generate sequential subgroup points: [g^0, g^1, ..., g^(n-1)]
+        let mut points = Vec::with_capacity(size);
+        let mut current = CirclePoint::IDENTITY;
+        for _ in 0..size {
+            points.push(current);
+            current = current.mul(generator);
+        }
+
+        // Apply circle bit-reverse permutation for canonic ordering
+        circle_bit_reverse_permutation(&mut points);
+
+        Self { log_size, size, generator, points }
+    }
+
     /// Get unique x-coordinates (for polynomial evaluation).
     /// Returns (unique_xs, mapping) where mapping[i] gives the index in unique_xs
     /// for domain point i.
@@ -515,12 +540,11 @@ impl CircleFFT {
 }
 
 // ============================================================================
-// Fast Circle FFT (O(n log n) Butterfly Algorithm)
+// Fast Circle FFT (O(n log n) using coset-based butterfly algorithm)
 // ============================================================================
-// Based on Stwo's proven implementation (Apache 2.0 licensed)
 
 /// Butterfly operation for forward FFT.
-/// 
+///
 /// Given v0, v1 and twiddle factor t, computes:
 /// - v0_new = v0 + v1 * t
 /// - v1_new = v0 - v1 * t
@@ -532,312 +556,402 @@ pub fn butterfly(v0: &mut M31, v1: &mut M31, twid: M31) {
 }
 
 /// Inverse butterfly operation for inverse FFT.
-/// 
+///
 /// Given v0, v1 and inverse twiddle factor it, computes:
 /// - v0_new = v0 + v1
 /// - v1_new = (v0 - v1) * it
-#[inline]  
+#[inline]
 pub fn ibutterfly(v0: &mut M31, v1: &mut M31, itwid: M31) {
     let tmp = *v0;
     *v0 = tmp + *v1;
     *v1 = (tmp - *v1) * itwid;
 }
 
-/// Precomputed twiddle factors for efficient FFT.
-/// 
-/// Twiddles are the x-coordinates of domain points, bit-reversed for
-/// efficient access during the butterfly passes.
+/// Precomputed twiddle factors for the Circle FFT.
+///
+/// Uses a "canonic coset" domain (odd coset of the subgroup) where:
+/// - Points i and i+N/2 are conjugates: same x, opposite y
+/// - No self-conjugate points exist in the coset
+///
+/// The FFT has two phases:
+/// - **Layer 0** (circle layer): butterfly with y-coordinate twiddles
+///   Decomposes f(x,y) = f₀(x) + y·f₁(x)
+/// - **Layers 1..n-1** (line layers): butterfly with x-coordinate twiddles
+///   Uses Chebyshev splitting: f(x) = f_even(2x²-1) + x·f_odd(2x²-1)
 #[derive(Clone, Debug)]
 pub struct CircleTwiddles {
-    /// Forward twiddles (x-coordinates of coset points).
-    pub twiddles: Vec<M31>,
-    /// Inverse twiddles (multiplicative inverses).
-    pub itwiddles: Vec<M31>,
-    /// Log size of the domain.
+    /// Forward twiddle factors, stored layer by layer.
+    /// Layer k has N/2^{k+1} entries. Total = N-1 entries for all n layers.
+    pub twiddles: Vec<Vec<M31>>,
+    /// Inverse twiddle factors (multiplicative inverses), stored layer by layer.
+    pub itwiddles: Vec<Vec<M31>>,
+    /// Log₂ of the full domain size N.
     pub log_size: usize,
+    /// The canonic coset domain points (N points, conjugates at i and i+N/2).
+    pub coset_points: Vec<CirclePoint>,
 }
 
 impl CircleTwiddles {
-    /// Precompute twiddle factors for a domain of size 2^log_size.
-    /// 
-    /// Follows Stwo's algorithm: for each layer, store x-coordinates
-    /// of coset points in bit-reversed order.
+    /// Precompute twiddle factors for the Circle FFT.
+    ///
+    /// Builds a canonic coset domain and computes:
+    /// - Layer 0 twiddles: y-coordinates of first N/2 coset points (bit-reversed)
+    /// - Layer k (k≥1) twiddles: x-coordinates of first half of k-times-doubled
+    ///   half-coset (bit-reversed)
     pub fn new(log_size: usize) -> Self {
         if log_size == 0 {
             return Self {
-                twiddles: vec![M31::ONE],
-                itwiddles: vec![M31::ONE],
+                twiddles: vec![],
+                itwiddles: vec![],
                 log_size,
+                coset_points: vec![CirclePoint::IDENTITY],
             };
         }
-        
-        if log_size == 1 {
-            // For size 2, we just need the y-coordinate of the generator
-            let gen = CirclePoint::generator(1);
-            return Self {
-                twiddles: vec![gen.y, M31::ONE],
-                itwiddles: vec![gen.y.inv(), M31::ONE],
-                log_size,
-            };
-        }
-        
-        // Start with a coset that generates the domain
-        // Use generator of order 2^log_size
-        let mut coset = CirclePoint::generator(log_size);
-        let mut coset_size = 1usize << log_size;
-        
-        let mut twiddles = Vec::with_capacity(coset_size);
-        
-        // For each layer, compute and store twiddles
-        // The twiddles are the x-coordinates of coset points
-        for layer in 0..log_size {
-            let start_idx = twiddles.len();
-            let half_size = coset_size / 2;
-            
-            // For each layer, collect x-coordinates of the first half of coset points
-            // Start from identity and step by generator
-            let mut point = CirclePoint::IDENTITY;
-            for _ in 0..half_size {
-                twiddles.push(point.x);
-                point = point.mul(coset);
-            }
-            
-            // Bit-reverse this layer's twiddles
-            if half_size > 1 {
-                bit_reverse_permutation(&mut twiddles[start_idx..]);
-            }
-            
-            // Double the coset generator for next layer
-            coset = coset.double();
-            coset_size /= 2;
-            
-            // After first layer, x-coordinates should all be non-zero
-            // The identity point has x=1, and we step by a generator that
-            // produces points with different x-coords
-            if layer == 0 && half_size > 0 {
-                // First layer contains identity (x=1), which is fine
-            }
-        }
-        
-        // Pad to power of 2 for alignment
-        twiddles.push(M31::ONE);
-        
-        // Compute inverse twiddles with safe fallback for any zeros
-        let itwiddles: Vec<M31> = twiddles.iter().map(|t| {
-            if t.is_zero() {
-                M31::ONE // Fallback for zero (should not happen in well-formed domains)
-            } else {
-                t.inv()
-            }
-        }).collect();
-        
-        Self { twiddles, itwiddles, log_size }
-    }
-    
-    /// Get twiddles for a specific layer.
-    fn layer_twiddles(&self, layer: usize) -> &[M31] {
-        if layer >= self.log_size {
-            return &[];
-        }
-        
-        // Calculate start index for this layer
-        let mut start = 0;
-        let mut layer_size = 1 << (self.log_size - 1);
-        for _ in 0..layer {
-            start += layer_size;
-            layer_size /= 2;
-        }
-        
-        &self.twiddles[start..(start + layer_size.max(1))]
-    }
 
-    /// Get inverse twiddles for a specific layer.
-    fn layer_itwiddles(&self, layer: usize) -> &[M31] {
-        if layer >= self.log_size {
-            return &[];
+        let n = 1usize << log_size;
+
+        // Build the canonic coset domain.
+        //
+        // The domain has N points arranged so that point i and point i+N/2
+        // are conjugates (same x, opposite y).
+        //
+        // Construction:
+        // - half_coset = {g_{4N} · g_N^k : k = 0..N/2-1}  (the "half odds" coset)
+        //   where g_m = generator of order m
+        // - Domain = half_coset ∪ conjugate(half_coset)
+        //   i.e., first N/2 points are the half coset, last N/2 are their conjugates
+        let initial = CirclePoint::generator(log_size + 2); // order 4N
+        let step = CirclePoint::generator(log_size);        // order N
+
+        let half_n = n / 2;
+
+        // Build half coset
+        let mut half_coset = Vec::with_capacity(half_n);
+        let mut current = initial;
+        for _ in 0..half_n {
+            half_coset.push(current);
+            current = current.mul(step);
         }
 
-        // Calculate start index for this layer
-        let mut start = 0;
-        let mut layer_size = 1 << (self.log_size - 1);
-        for _ in 0..layer {
-            start += layer_size;
-            layer_size /= 2;
+        // Build full domain: half_coset then conjugates
+        let mut coset_points = Vec::with_capacity(n);
+        for &p in &half_coset {
+            coset_points.push(p);
+        }
+        for &p in &half_coset {
+            coset_points.push(p.conjugate()); // (x, -y)
         }
 
-        &self.itwiddles[start..(start + layer_size.max(1))]
+        // Compute twiddles following Stwo's approach.
+        //
+        // The half_coset has N/2 points. The FFT has log_n layers total:
+        // - Layer 0 (circle): stride 1, N/2 twiddles from y-coordinates
+        // - Layer k (line, k=1..log_n-1): stride 2^k, N/2^{k+1} twiddles from x-coordinates
+        //
+        // Stwo computes line twiddles by iterating through doubling levels
+        // of the half_coset:
+        //   coset = half_coset
+        //   line_layer[0]: x-coords of first half of coset (N/4 entries)
+        //   coset = double(coset)  → N/4 points
+        //   line_layer[1]: x-coords of first half of doubled coset (N/8 entries)
+        //   ...
+        //
+        // Circle twiddles (N/2 entries) are derived from the first line layer
+        // using the coset-of-4 structure.
+        //
+        // Circle twiddles are derived from the first line layer, matching Stwo.
+
+        // Step 1: Compute line twiddles from the half_coset.
+        // At each level, take x-coords of first half, bit-reverse, then double the coset.
+        let mut line_coset = half_coset.clone();
+        let num_line_layers = if log_size > 0 { log_size - 1 } else { 0 };
+
+        let mut line_twid_layers: Vec<Vec<M31>> = Vec::with_capacity(num_line_layers);
+        let mut line_itwid_layers: Vec<Vec<M31>> = Vec::with_capacity(num_line_layers);
+
+        for _ll in 0..num_line_layers {
+            let coset_size = line_coset.len();
+            let twid_count = coset_size / 2;
+
+            let mut layer_twids: Vec<M31> =
+                line_coset[..twid_count].iter().map(|p| p.x).collect();
+            bit_reverse_permutation(&mut layer_twids);
+            let layer_itwids = batch_inverse(&layer_twids);
+
+            line_twid_layers.push(layer_twids);
+            line_itwid_layers.push(layer_itwids);
+
+            // Advance to the next doubled coset level.
+            // This is equivalent to coset = coset.double() in reference code:
+            // keep the first half of the current coset and double every point.
+            let mut next = Vec::with_capacity(twid_count);
+            for &p in line_coset.iter().take(twid_count) {
+                next.push(p.double());
+            }
+            line_coset = next;
+        }
+
+        // Step 2: Derive circle twiddles from the first line twiddle layer.
+        // In Stwo, each consecutive pair (x, y) in the first line twiddles
+        // expands to 4 circle twiddles: [y, -y, -x, x].
+        // This reflects the structure of 4-element circle cosets.
+        let mut circle_twids = Vec::with_capacity(half_n);
+        if num_line_layers > 0 && !line_twid_layers[0].is_empty() {
+            let first_line = &line_twid_layers[0];
+            for chunk in first_line.chunks(2) {
+                if chunk.len() == 2 {
+                    let x_val = chunk[0];
+                    let y_val = chunk[1];
+                    circle_twids.push(y_val);
+                    circle_twids.push(-y_val);
+                    circle_twids.push(-x_val);
+                    circle_twids.push(x_val);
+                } else {
+                    // Odd number of line twiddles — expand single
+                    let x_val = chunk[0];
+                    circle_twids.push(x_val);
+                    circle_twids.push(-x_val);
+                }
+            }
+        } else if half_n > 0 {
+            // log_size = 1: only circle layer, twiddle = y-coord of single half_coset point
+            circle_twids.push(half_coset[0].y);
+        }
+        let circle_itwids = batch_inverse(&circle_twids);
+
+        // Assemble: twiddles[0] = circle, twiddles[k] = line_twid_layers[k-1]
+        let mut twiddles = Vec::with_capacity(log_size);
+        let mut itwiddles = Vec::with_capacity(log_size);
+
+        twiddles.push(circle_twids);
+        itwiddles.push(circle_itwids);
+
+        for i in 0..num_line_layers {
+            twiddles.push(line_twid_layers[i].clone());
+            itwiddles.push(line_itwid_layers[i].clone());
+        }
+
+        Self { twiddles, itwiddles, log_size, coset_points }
     }
 }
 
-/// Fast Circle FFT implementation.
-/// 
-/// NOTE: Currently delegates to the O(n²) CircleFFT for correctness.
-/// The butterfly operations above are ready for O(n log n) implementation.
-/// 
-/// TODO: Implement proper O(n log n) butterfly-based Circle FFT.
-/// See: https://github.com/starkware-libs/stwo
+/// Batch multiplicative inverse using Montgomery's trick.
+///
+/// Computes inverses of all elements in O(n) multiplications + 1 inversion.
+/// Elements that are zero get M31::ZERO as their "inverse".
+fn batch_inverse(values: &[M31]) -> Vec<M31> {
+    let n = values.len();
+    if n == 0 {
+        return vec![];
+    }
+
+    // Forward pass: accumulate products
+    let mut prefix = Vec::with_capacity(n);
+    let mut acc = M31::ONE;
+    for &v in values {
+        if v.is_zero() {
+            prefix.push(acc);
+        } else {
+            acc = acc * v;
+            prefix.push(acc);
+        }
+    }
+
+    // Invert the accumulated product
+    let mut inv_acc = if acc.is_zero() { M31::ONE } else { acc.inv() };
+
+    // Backward pass: extract individual inverses
+    let mut result = vec![M31::ZERO; n];
+    for i in (0..n).rev() {
+        if values[i].is_zero() {
+            result[i] = M31::ZERO;
+        } else {
+            let prev = if i == 0 { M31::ONE } else { prefix[i - 1] };
+            result[i] = inv_acc * prev;
+            inv_acc = inv_acc * values[i];
+        }
+    }
+
+    result
+}
+
+/// Fast Circle FFT implementation using O(n log n) butterfly algorithm.
+///
+/// Uses the circle polynomial basis where coefficients represent:
+///   f(x,y) = Σ c_j · b_j(x,y)
+/// with basis elements b_j = y^{j₀} · x^{j₁} · (2x²-1)^{j₂} · ...
+///
+/// The domain is a canonic coset where point i and point i+N/2 are
+/// conjugates (same x, opposite y), enabling clean butterfly decomposition.
+///
+/// Coefficients are stored in bit-reversed order of the basis index.
 #[derive(Clone, Debug)]
 pub struct FastCircleFFT {
-    /// Delegate to proven implementation.
-    inner: CircleFFT,
-    #[allow(dead_code)]
+    /// Precomputed twiddle factors.
     twiddles: CircleTwiddles,
 }
 
 impl FastCircleFFT {
     /// Create a Fast Circle FFT for domain size 2^log_size.
     pub fn new(log_size: usize) -> Self {
-        Self { 
-            inner: CircleFFT::new(log_size),
-            twiddles: CircleTwiddles::new(log_size),
-        }
+        let twiddles = CircleTwiddles::new(log_size);
+        Self { twiddles }
     }
-    
-    /// Forward FFT: polynomial coefficients → evaluations.
+
+    /// Forward FFT (evaluation): circle-basis coefficients → evaluations on coset domain.
+    ///
+    /// Input: up to N coefficients in circle basis (bit-reversed order)
+    /// Output: N evaluations at the canonic coset points
+    ///
+    /// Structure (DIF - Decimation In Frequency):
+    /// 1. Line layers (log_n-1 down to 1): x-coordinate butterflies
+    /// 2. Circle layer (0): y-coordinate butterflies
     pub fn fft(&self, coeffs: &[M31]) -> Vec<M31> {
-        let n = 1 << self.twiddles.log_size;
-        let half = n / 2;
+        let log_n = self.twiddles.log_size;
+        if log_n == 0 {
+            return if coeffs.is_empty() { vec![M31::ZERO] } else { vec![coeffs[0]] };
+        }
 
-        // Pad coefficients to half domain size
-        let mut values = coeffs.to_vec();
-        values.resize(half, M31::ZERO);
+        let n = 1usize << log_n;
 
-        // Duplicate for full domain (twin points have same value for x-based polynomials)
-        values.extend(values.clone());
+        // Pad coefficients to N
+        let mut values = vec![M31::ZERO; n];
+        let copy_len = coeffs.len().min(n);
+        values[..copy_len].copy_from_slice(&coeffs[..copy_len]);
 
-        // Apply butterfly passes
-        for layer in (0..self.twiddles.log_size).rev() {
-            let layer_twiddles = self.twiddles.layer_twiddles(self.twiddles.log_size - 1 - layer);
-            let half_size = 1 << layer;
-            let num_groups = n >> (layer + 1);
+        // DIF: process from widest butterflies (high layer) to narrowest (low layer)
+        // Layer k has half_block = 2^k, block_size = 2^{k+1}, num_twiddles = N/2^{k+1}
+        //
+        // Line layers: k = log_n-1 down to 1 (x-coordinate twiddles)
+        for layer in (1..log_n).rev() {
+            let twids = &self.twiddles.twiddles[layer];
+            let half_block = 1usize << layer;
+            let block_size = half_block * 2;
 
-            for h in 0..num_groups {
-                for l in 0..half_size {
-                    let idx0 = (h << (layer + 1)) + l;
-                    let idx1 = idx0 + half_size;
-
-                    // Safety: Indices are within bounds by construction
-                    let val0 = values[idx0];
-                    let val1 = values[idx1];
-
-                    // Twiddle depends on offset l within the group
-                    let twid = layer_twiddles[l];
-
-                    // Inlined butterfly to avoid borrowing issues
-                    let tmp = val1 * twid;
-                    values[idx1] = val0 - tmp;
-                    values[idx0] = val0 + tmp;
+            for (h, &t) in twids.iter().enumerate() {
+                let base = h * block_size;
+                for l in 0..half_block {
+                    let idx0 = base + l;
+                    let idx1 = idx0 + half_block;
+                    let tmp = values[idx1] * t;
+                    values[idx1] = values[idx0] - tmp;
+                    values[idx0] = values[idx0] + tmp;
                 }
+            }
+        }
+
+        // Circle layer (layer 0): y-coordinate twiddles
+        // half_block = 1, block_size = 2, operates on pairs (2h, 2h+1)
+        {
+            let twids = &self.twiddles.twiddles[0];
+            for (h, &t) in twids.iter().enumerate() {
+                let idx0 = 2 * h;
+                let idx1 = idx0 + 1;
+                let tmp = values[idx1] * t;
+                values[idx1] = values[idx0] - tmp;
+                values[idx0] = values[idx0] + tmp;
             }
         }
 
         values
     }
-    
-    /// Inverse FFT: evaluations → polynomial coefficients.
-    pub fn ifft(&self, evals: &[M31]) -> Vec<M31> {
-        let n = 1 << self.twiddles.log_size;
-        let half = n / 2;
 
+    /// Inverse FFT (interpolation): evaluations → circle-basis coefficients.
+    ///
+    /// Input: N evaluations at the canonic coset points
+    /// Output: N coefficients in circle basis (bit-reversed order)
+    ///
+    /// Structure (DIT - Decimation In Time):
+    /// 1. Circle layer (0): y-coordinate inverse butterflies
+    /// 2. Line layers (1 up to log_n-1): x-coordinate inverse butterflies
+    /// 3. Normalize by 1/N
+    pub fn ifft(&self, evals: &[M31]) -> Vec<M31> {
+        let log_n = self.twiddles.log_size;
+        if log_n == 0 {
+            return evals.to_vec();
+        }
+
+        let n = 1usize << log_n;
         assert_eq!(evals.len(), n, "Evaluation count must match domain size");
 
         let mut values = evals.to_vec();
 
-        // Apply inverse butterfly passes
-        for layer in 0..self.twiddles.log_size {
-            let layer_itwiddles = self.twiddles.layer_itwiddles(self.twiddles.log_size - 1 - layer);
-            let half_size = 1 << layer;
-            let num_groups = n >> (layer + 1);
+        // DIT: process from narrowest butterflies (low layer) to widest (high layer)
+        // Layer k has half_block = 2^k, block_size = 2^{k+1}, num_twiddles = N/2^{k+1}
 
-            for h in 0..num_groups {
-                for l in 0..half_size {
-                    let idx0 = (h << (layer + 1)) + l;
-                    let idx1 = idx0 + half_size;
+        // Circle layer (layer 0): y-coordinate inverse twiddles on pairs (2h, 2h+1)
+        {
+            let itwids = &self.twiddles.itwiddles[0];
+            for (h, &it) in itwids.iter().enumerate() {
+                let idx0 = 2 * h;
+                let idx1 = idx0 + 1;
+                let tmp = values[idx0];
+                values[idx0] = tmp + values[idx1];
+                values[idx1] = (tmp - values[idx1]) * it;
+            }
+        }
 
-                    let val0 = values[idx0];
-                    let val1 = values[idx1];
+        // Line layers: k = 1 up to log_n-1 (x-coordinate inverse twiddles)
+        for layer in 1..log_n {
+            let itwids = &self.twiddles.itwiddles[layer];
+            let half_block = 1usize << layer;
+            let block_size = half_block * 2;
 
-                    // Twiddle depends on offset l within the group
-                    let itwid = layer_itwiddles[l];
-
-                    // Inlined ibutterfly
-                    let tmp = val0;
-                    values[idx0] = tmp + val1;
-                    values[idx1] = (tmp - val1) * itwid;
+            for (h, &it) in itwids.iter().enumerate() {
+                let base = h * block_size;
+                for l in 0..half_block {
+                    let idx0 = base + l;
+                    let idx1 = idx0 + half_block;
+                    let tmp = values[idx0];
+                    values[idx0] = tmp + values[idx1];
+                    values[idx1] = (tmp - values[idx1]) * it;
                 }
             }
         }
 
-        // Normalize by n and take first half
+        // Normalize by 1/N
         let n_inv = M31::new(n as u32).inv();
-        values.iter().take(half).map(|&v| v * n_inv).collect()
+        for v in &mut values {
+            *v = *v * n_inv;
+        }
+
+        values
     }
-    
-    /// Low-degree extension using FFT.
+
+    /// Low-degree extension: extend evaluations to a larger domain.
+    ///
+    /// Given evaluations on a coset of size N, returns evaluations
+    /// on a coset of size N · 2^log_extension.
     pub fn extend(&self, evals: &[M31], log_extension: usize) -> Vec<M31> {
-        self.inner.extend(evals, log_extension)
+        let coeffs = self.ifft(evals);
+        let ext = FastCircleFFT::new(self.log_size() + log_extension);
+        ext.fft(&coeffs) // zero-pads automatically
     }
-    
+
     /// Get domain size.
+    #[inline]
     pub fn size(&self) -> usize {
-        self.inner.size()
+        1usize << self.twiddles.log_size
     }
-    
+
     /// Get log domain size.
+    #[inline]
     pub fn log_size(&self) -> usize {
-        self.inner.log_size()
-    }
-    
-    /// Get the domain.
-    pub fn domain(&self) -> &CircleDomain {
-        self.inner.domain()
+        self.twiddles.log_size
     }
 
-    /// Get point in the domain.
+    /// Get the coset domain used by this FFT.
+    pub fn domain(&self) -> &[CirclePoint] {
+        &self.twiddles.coset_points
+    }
+
+    /// Get point in the coset domain.
+    #[inline]
     pub fn get_domain_point(&self, index: usize) -> CirclePoint {
-        self.inner.get_domain_point(index)
+        let n = self.size();
+        self.twiddles.coset_points[index % n]
     }
-}
 
-/// Execute one layer of the FFT butterfly algorithm.
-/// 
-/// This processes all butterflies at a given layer with the same twiddle factor.
-#[inline]
-fn fft_layer_loop<F>(
-    values: &mut [M31], 
-    layer: usize, 
-    h: usize, 
-    twid: M31, 
-    butterfly_fn: F
-) where F: Fn(&mut M31, &mut M31, M31) {
-    let layer_size = 1 << layer;
-    for l in 0..layer_size {
-        let idx0 = (h << (layer + 1)) + l;
-        let idx1 = idx0 + layer_size;
-        if idx1 < values.len() {
-            let (mut val0, mut val1) = (values[idx0], values[idx1]);
-            butterfly_fn(&mut val0, &mut val1, twid);
-            values[idx0] = val0;
-            values[idx1] = val1;
-        }
-    }
-}
-
-/// Compute circle twiddles (layer 0) from line twiddles (layer 1).
-/// 
-/// The relationship between consecutive domain points allows us to derive
-/// the y-coordinate twiddles from the x-coordinate twiddles.
-fn circle_twiddles_from_line(line_twiddles: &[M31]) -> impl Iterator<Item = M31> + '_ {
-    // Each pair of x-coordinates [x, y] generates circle twiddles [y, -y, -x, x]
-    line_twiddles.chunks(2).flat_map(|chunk| {
-        if chunk.len() == 2 {
-            vec![chunk[1], -chunk[1], -chunk[0], chunk[0]]
-        } else if chunk.len() == 1 {
-            vec![chunk[0]]
-        } else {
-            vec![]
-        }
-    })
 }
 
 /// Evaluate polynomial at a single point using Horner's method.
@@ -1033,9 +1147,9 @@ pub fn bit_reverse_permutation<T: Copy>(data: &mut [T]) {
     if n <= 1 {
         return;
     }
-    
+
     let log_n = n.trailing_zeros() as usize;
-    
+
     for i in 0..n {
         let j = bit_reverse(i, log_n);
         if i < j {
@@ -1047,7 +1161,51 @@ pub fn bit_reverse_permutation<T: Copy>(data: &mut [T]) {
 /// Reverse the bits of x, treating it as a log_n-bit number.
 #[inline]
 pub fn bit_reverse(x: usize, log_n: usize) -> usize {
+    if log_n == 0 {
+        return 0;
+    }
     x.reverse_bits() >> (usize::BITS as usize - log_n)
+}
+
+// ============================================================================
+// Circle Bit Reversal (for Circle FFT canonic ordering)
+// ============================================================================
+
+/// Circle-specific bit reversal: reverses bits `log_n-1..1`, keeps bit 0 fixed.
+///
+/// In canonic ordering, conjugate pairs (x, y) and (x, -y) are placed at
+/// positions i and i + N/2. This is achieved by reversing the upper bits
+/// while keeping the lowest bit (which distinguishes conjugates) fixed.
+#[inline]
+pub fn circle_bit_reverse(i: usize, log_n: usize) -> usize {
+    if log_n <= 1 {
+        return i;
+    }
+    // Split: upper bits = i >> 1, lowest bit = i & 1
+    let upper = i >> 1;
+    let lowest = i & 1;
+    // Reverse the upper (log_n - 1) bits
+    let reversed_upper = bit_reverse(upper, log_n - 1);
+    (reversed_upper << 1) | lowest
+}
+
+/// Apply circle bit-reverse permutation to a slice.
+///
+/// This reorders elements so that conjugate points end up at positions
+/// i and i + N/2 (same x, opposite y), which is required for correct
+/// Circle FFT butterfly decomposition.
+pub fn circle_bit_reverse_permutation<T: Copy>(data: &mut [T]) {
+    let n = data.len();
+    if n <= 2 {
+        return;
+    }
+    let log_n = n.trailing_zeros() as usize;
+    for i in 0..n {
+        let j = circle_bit_reverse(i, log_n);
+        if i < j {
+            data.swap(i, j);
+        }
+    }
 }
 
 // ============================================================================
@@ -1361,47 +1519,40 @@ mod tests {
     
     #[test]
     fn test_fast_fft_small_sizes() {
-        // Test size 4 (log_size 2) - smallest working size
-        let fft4 = FastCircleFFT::new(2);
-        // For size 4, we provide 2 coefficients (n/2 = 2)
-        let coeffs4 = vec![M31::new(1), M31::new(2)]; // f(x) = 1 + 2x
-        let evals4 = fft4.fft(&coeffs4);
-        assert_eq!(evals4.len(), 4, "FFT should produce 4 evaluations");
-        
-        // Test size 8 (log_size 3)
-        let fft8 = FastCircleFFT::new(3);
-        // For size 8, we provide 4 coefficients (n/2 = 4)
-        let coeffs8 = vec![M31::new(1), M31::new(2), M31::new(3), M31::new(4)];
-        let evals8 = fft8.fft(&coeffs8);
-        assert_eq!(evals8.len(), 8, "FFT should produce 8 evaluations");
+        // Test small FFT sizes produce correct output length
+        for log_size in 1..=4 {
+            let fft = FastCircleFFT::new(log_size);
+            let n = 1usize << log_size;
+            let coeffs: Vec<M31> = (0..n).map(|i| M31::new(i as u32 + 1)).collect();
+            let evals = fft.fft(&coeffs);
+            assert_eq!(evals.len(), n, "FFT output size mismatch for log_size {}", log_size);
+        }
     }
-    
+
     #[test]
     fn test_fast_fft_roundtrip() {
         // Test that fft followed by ifft preserves coefficients
-        // CircleFFT: fft takes n/2 coeffs -> n evals, ifft takes n evals -> n/2 coeffs
-        for log_size in 2..=5 {
+        for log_size in 1..=8 {
             let fast_fft = FastCircleFFT::new(log_size);
-            let n = 1 << log_size;
-            let half = n / 2;
-            
-            // Create test coefficients (only n/2 meaningful for degree < n/2)
-            let coeffs: Vec<M31> = (0..half).map(|i| M31::new((i * 7 + 13) as u32 % 1000)).collect();
-            
-            // Forward FFT: n/2 coeffs -> n evals
+            let n = 1usize << log_size;
+
+            // Create N test coefficients (circle basis, bit-reversed order)
+            let coeffs: Vec<M31> = (0..n).map(|i| M31::new((i * 7 + 13) as u32 % 1000)).collect();
+
+            // Forward FFT: N coeffs -> N evals
             let evals = fast_fft.fft(&coeffs);
             assert_eq!(evals.len(), n, "FFT output size mismatch for log_size {}", log_size);
-            
-            // Inverse FFT: n evals -> n/2 coeffs
+
+            // Inverse FFT: N evals -> N coeffs
             let recovered = fast_fft.ifft(&evals);
-            assert_eq!(recovered.len(), half, "IFFT output size mismatch for log_size {}", log_size);
-            
-            // Check roundtrip for the meaningful coefficients
-            for i in 0..half {
+            assert_eq!(recovered.len(), n, "IFFT output size mismatch for log_size {}", log_size);
+
+            // Check roundtrip
+            for i in 0..n {
                 assert_eq!(
-                    recovered[i], coeffs[i], 
-                    "Roundtrip failed at index {} for log_size {}: got {:?}, expected {:?}",
-                    i, log_size, recovered[i], coeffs[i]
+                    recovered[i], coeffs[i],
+                    "Roundtrip failed at index {} for log_size {}: got {}, expected {}",
+                    i, log_size, recovered[i].value(), coeffs[i].value()
                 );
             }
         }
@@ -1410,13 +1561,194 @@ mod tests {
     #[test]
     fn test_fast_fft_extend() {
         let fft = FastCircleFFT::new(3);  // size 8
-        
-        // Create coefficients (n/2 = 4 meaningful coefficients)
-        let coeffs: Vec<M31> = (0..4).map(|i| M31::new(i as u32)).collect();
+        let n = 8;
+
+        // Create N coefficients
+        let coeffs: Vec<M31> = (0..n).map(|i| M31::new(i as u32)).collect();
         let evals = fft.fft(&coeffs);
-        
+
         // Extend to size 16
         let extended = fft.extend(&evals, 1);
         assert_eq!(extended.len(), 16);
+    }
+
+    #[test]
+    fn test_coset_domain_conjugate_invariant() {
+        // Verify coset domain has conjugate pairs at i, i+N/2
+        for log_size in 1..=8 {
+            let fft = FastCircleFFT::new(log_size);
+            let n = 1usize << log_size;
+            let half = n / 2;
+
+            for i in 0..half {
+                let p1 = fft.get_domain_point(i);
+                let p2 = fft.get_domain_point(i + half);
+                assert_eq!(p1.x, p2.x,
+                    "Coset domain: point {} and {} should share x for log_size {}",
+                    i, i + half, log_size);
+                assert_eq!(p1.y, -p2.y,
+                    "Coset domain: point {} and {} should have opposite y for log_size {}",
+                    i, i + half, log_size);
+            }
+        }
+    }
+
+    #[test]
+    fn test_fast_fft_constant_poly() {
+        // Constant polynomial f = 42 (only c_0 nonzero)
+        for log_size in 1..=5 {
+            let fft = FastCircleFFT::new(log_size);
+            let n = 1usize << log_size;
+            let mut coeffs = vec![M31::ZERO; n];
+            coeffs[0] = M31::new(42);
+
+            let evals = fft.fft(&coeffs);
+
+            // Constant polynomial should evaluate to 42 everywhere
+            for (i, &e) in evals.iter().enumerate() {
+                assert_eq!(e, M31::new(42),
+                    "Constant poly eval at {} should be 42 for log_size {}, got {}",
+                    i, log_size, e.value());
+            }
+        }
+    }
+
+    #[test]
+    fn test_fast_fft_extend_consistency() {
+        // Extend via small FFT should match direct FFT on larger domain
+        for log_size in 2..=6 {
+            let fft = FastCircleFFT::new(log_size);
+            let n = 1usize << log_size;
+
+            // Use low-degree coefficients (fill only first half)
+            let half = n / 2;
+            let mut coeffs = vec![M31::ZERO; n];
+            for i in 0..half {
+                coeffs[i] = M31::new((i * 3 + 5) as u32 % 100);
+            }
+
+            // Path 1: fft → extend
+            let evals = fft.fft(&coeffs);
+            let extended = fft.extend(&evals, 1);
+
+            // Path 2: direct fft on larger domain with zero-padded coefficients
+            let ext_fft = FastCircleFFT::new(log_size + 1);
+            let direct_extended = ext_fft.fft(&coeffs);
+
+            // Both paths should produce identical results
+            assert_eq!(extended.len(), direct_extended.len());
+            for i in 0..extended.len() {
+                assert_eq!(extended[i], direct_extended[i],
+                    "Extend mismatch at {} for log_size {}: extend={}, direct={}",
+                    i, log_size, extended[i].value(), direct_extended[i].value());
+            }
+        }
+    }
+
+    #[test]
+    fn test_fast_fft_linearity() {
+        // FFT should be linear: fft(a*coeffs1 + b*coeffs2) = a*fft(coeffs1) + b*fft(coeffs2)
+        let fft = FastCircleFFT::new(4);
+        let n = 16;
+
+        let coeffs1: Vec<M31> = (0..n).map(|i| M31::new((i * 3 + 7) as u32 % 500)).collect();
+        let coeffs2: Vec<M31> = (0..n).map(|i| M31::new((i * 11 + 2) as u32 % 500)).collect();
+        let a = M31::new(5);
+        let b = M31::new(13);
+
+        let combined: Vec<M31> = (0..n).map(|i| a * coeffs1[i] + b * coeffs2[i]).collect();
+
+        let evals1 = fft.fft(&coeffs1);
+        let evals2 = fft.fft(&coeffs2);
+        let evals_combined = fft.fft(&combined);
+
+        for i in 0..n {
+            let expected = a * evals1[i] + b * evals2[i];
+            assert_eq!(evals_combined[i], expected,
+                "Linearity failed at {}: got {}, expected {}",
+                i, evals_combined[i].value(), expected.value());
+        }
+    }
+
+    /// Reference twiddle generation that mirrors Stwo's coset-doubling recurrence.
+    fn expected_twiddles_from_recurrence(log_size: usize) -> Vec<Vec<M31>> {
+        assert!(log_size >= 4, "reference recurrence is only used for log_size >= 4");
+
+        let n = 1usize << log_size;
+        let mut initial = CirclePoint::generator(log_size + 2);
+        let mut step = CirclePoint::generator(log_size);
+        let mut coset_size = n / 2;
+
+        let mut line_layers = Vec::with_capacity(log_size - 1);
+        for _ in 1..log_size {
+            let twid_count = coset_size / 2;
+            let mut point = initial;
+            let mut layer_twids = Vec::with_capacity(twid_count);
+
+            for _ in 0..twid_count {
+                layer_twids.push(point.x);
+                point = point.mul(step);
+            }
+            bit_reverse_permutation(&mut layer_twids);
+            line_layers.push(layer_twids);
+
+            initial = initial.double();
+            step = step.double();
+            coset_size /= 2;
+        }
+
+        let mut circle_twids = Vec::with_capacity(n / 2);
+        for chunk in line_layers[0].chunks_exact(2) {
+            let x = chunk[0];
+            let y = chunk[1];
+            circle_twids.push(y);
+            circle_twids.push(-y);
+            circle_twids.push(-x);
+            circle_twids.push(x);
+        }
+
+        let mut out = Vec::with_capacity(log_size);
+        out.push(circle_twids);
+        out.extend(line_layers);
+        out
+    }
+
+    #[test]
+    fn test_fast_fft_twiddles_match_reference_recurrence() {
+        for log_size in 4..=10 {
+            let got = CircleTwiddles::new(log_size).twiddles;
+            let expected = expected_twiddles_from_recurrence(log_size);
+            assert_eq!(got.len(), expected.len(), "layer count mismatch for log_size {log_size}");
+
+            for (layer_idx, (got_layer, expected_layer)) in
+                got.iter().zip(expected.iter()).enumerate()
+            {
+                assert_eq!(
+                    got_layer, expected_layer,
+                    "twiddle mismatch at log_size {log_size}, layer {layer_idx}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_fast_fft_conjugate_domain_structure() {
+        // Verify the domain has correct conjugate pairing:
+        // domain[i] and domain[i+N/2] should have same x, opposite y
+        for log_size in 1..=6 {
+            let fft = FastCircleFFT::new(log_size);
+            let domain = fft.domain();
+            let n = domain.len();
+            let half = n / 2;
+
+            for i in 0..half {
+                assert_eq!(domain[i].x, domain[i + half].x,
+                    "x-coords should match at ({}, {}) for log_size {}",
+                    i, i + half, log_size);
+                assert_eq!(domain[i].y, M31::ZERO - domain[i + half].y,
+                    "y-coords should be opposite at ({}, {}) for log_size {}",
+                    i, i + half, log_size);
+            }
+        }
     }
 }

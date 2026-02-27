@@ -17,5 +17,5 @@ pub mod p3_interop;
 pub use field::M31;
 pub use extension::{CM31, QM31, U_SQUARED};
 pub use limbs::{to_limbs, from_limbs};
-pub use circle::{CirclePoint, CircleDomain, CircleFFT, Coset, FastCircleFFT};
+pub use circle::{CirclePoint, CircleDomain, CircleFFT, Coset, FastCircleFFT, CircleTwiddles};
 pub use p3_interop::{to_p3, from_p3, P3M31};
