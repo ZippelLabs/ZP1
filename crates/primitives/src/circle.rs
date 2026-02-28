@@ -1770,10 +1770,15 @@ mod tests {
             );
 
             let recovered_scalar = fft.ifft_scalar_parallel(&evals_scalar);
-            let recovered_packed = fft.ifft_packed_simd(&evals_scalar);
+            let recovered_packed = fft.ifft_packed_simd(&evals_packed);
             assert_eq!(
                 recovered_scalar, recovered_packed,
                 "IFFT path mismatch for log_size {}",
+                log_size
+            );
+            assert_eq!(
+                recovered_packed, coeffs,
+                "Packed end-to-end roundtrip mismatch for log_size {}",
                 log_size
             );
         }
