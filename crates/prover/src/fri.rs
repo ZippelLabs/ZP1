@@ -17,6 +17,8 @@
 //!
 //! This halves both the domain size and polynomial degree.
 
+use std::collections::HashMap;
+
 use zp1_primitives::{CirclePoint, M31};
 use crate::channel::ProverChannel;
 use crate::commitment::MerkleTree;
@@ -45,6 +47,17 @@ pub enum SecurityLevel {
     Bits128,
 }
 
+const MAX_FRI_CIRCLE_LOG_SIZE: usize = 30;
+
+#[inline]
+fn assert_supported_fri_log_size(log_domain_size: usize, context: &str) {
+    assert!(
+        log_domain_size <= MAX_FRI_CIRCLE_LOG_SIZE,
+        "{context} only supports log_domain_size <= {} because canonic Circle FRI requires CirclePoint::generator(log_domain_size + 1) <= 31",
+        MAX_FRI_CIRCLE_LOG_SIZE
+    );
+}
+
 impl FriConfig {
     /// Create a default FRI configuration (100-bit security).
     pub fn new(log_domain_size: usize) -> Self {
@@ -53,6 +66,7 @@ impl FriConfig {
     
     /// Create a FRI configuration with specified security level.
     pub fn with_security(log_domain_size: usize, level: SecurityLevel) -> Self {
+        assert_supported_fri_log_size(log_domain_size, "FriConfig");
         let num_queries = match level {
             SecurityLevel::Bits80 => 40,   // ~80 bits from FRI
             SecurityLevel::Bits100 => 50,  // ~100 bits from FRI  
@@ -69,6 +83,7 @@ impl FriConfig {
     
     /// Create a fast configuration for testing (reduced security).
     pub fn fast(log_domain_size: usize) -> Self {
+        assert_supported_fri_log_size(log_domain_size, "FriConfig");
         Self {
             log_domain_size,
             folding_factor: 2,
@@ -171,15 +186,32 @@ fn fold_conjugate_pair(f_pos: M31, f_neg: M31, alpha: M31, y_i: M31, inv_two: M3
 }
 
 #[inline]
-fn canonic_pair_y(layer_log_size: usize, pair_idx: usize) -> M31 {
-    let initial = CirclePoint::generator(layer_log_size + 2);
-    let step = CirclePoint::generator(layer_log_size);
+fn canonic_layer_generators(
+    layer_log_size: usize,
+    context: &str,
+) -> (usize, CirclePoint, CirclePoint) {
+    assert_supported_fri_log_size(layer_log_size, context);
+    assert!(layer_log_size > 0, "{context} requires layer_log_size > 0");
+
+    let half_n = 1usize << (layer_log_size - 1);
+    let initial = CirclePoint::generator(layer_log_size + 1);
+    let step = if layer_log_size == 1 {
+        CirclePoint::IDENTITY
+    } else {
+        CirclePoint::generator(layer_log_size - 1)
+    };
+    (half_n, initial, step)
+}
+
+#[inline]
+fn canonic_pair_y(initial: CirclePoint, step: CirclePoint, pair_idx: usize) -> M31 {
     initial.mul(step.pow(pair_idx as u64)).y
 }
 
 impl FriProver {
     /// Create a new FRI prover with the given configuration.
     pub fn new(config: FriConfig) -> Self {
+        assert_supported_fri_log_size(config.log_domain_size, "FriProver");
         Self { config }
     }
 
@@ -252,11 +284,10 @@ impl FriProver {
 
         let inv_two = M31::new(2).inv();
 
-        // Build the same coset that FastCircleFFT uses for this layer's domain size.
-        // Coset: initial = generator(log_n + 2), step = generator(log_n)
         let layer_log_size = self.config.log_domain_size.saturating_sub(layer);
-        let initial = CirclePoint::generator(layer_log_size + 2);
-        let step = CirclePoint::generator(layer_log_size);
+        let (expected_half_n, initial, step) =
+            canonic_layer_generators(layer_log_size, "FRI folding");
+        debug_assert_eq!(expected_half_n, half_n);
 
         let mut point = initial;
         for i in 0..half_n {
@@ -340,6 +371,20 @@ impl FriProver {
             self.config.num_queries,
             1 << self.config.log_domain_size,
         );
+        let inv_two = M31::new(2).inv();
+        let layer_geometry: Vec<_> = proof
+            .layer_commitments
+            .iter()
+            .enumerate()
+            .map(|(layer_idx, _)| {
+                canonic_layer_generators(
+                    self.config.log_domain_size.saturating_sub(layer_idx),
+                    "FRI verification",
+                )
+            })
+            .collect();
+        let mut layer_y_cache: Vec<HashMap<usize, M31>> =
+            (0..layer_geometry.len()).map(|_| HashMap::new()).collect();
         
         for (query_idx, query_proof) in proof.query_proofs.iter().enumerate() {
             if query_proof.index != query_indices[query_idx] {
@@ -363,13 +408,12 @@ impl FriProver {
                 
                 // Compute expected folded value for next layer
                 let alpha = challenges[layer_idx];
-                let inv_two = M31::new(2).inv();
-                let layer_log_size = self.config.log_domain_size.saturating_sub(layer_idx);
-                let layer_n = 1usize << layer_log_size;
-                let half_n = layer_n / 2;
+                let (half_n, initial, step) = layer_geometry[layer_idx];
 
                 let pair_idx = current_idx % half_n;
-                let y_i = canonic_pair_y(layer_log_size, pair_idx);
+                let y_i = *layer_y_cache[layer_idx]
+                    .entry(pair_idx)
+                    .or_insert_with(|| canonic_pair_y(initial, step, pair_idx));
 
                 let (f_pos, f_neg) = if current_idx < half_n {
                     (layer_proof.value, layer_proof.sibling_value)
@@ -440,11 +484,12 @@ mod tests {
         let n = evals.len();
         let half_n = n / 2;
         let inv_two = M31::new(2).inv();
+        let (_, initial, step) = canonic_layer_generators(4, "FRI test");
 
         for idx in 0..n {
             let pair_idx = idx % half_n;
             let sibling_idx = (idx + half_n) % n;
-            let y_i = canonic_pair_y(4, pair_idx);
+            let y_i = canonic_pair_y(initial, step, pair_idx);
 
             let (f_pos, f_neg) = if idx < half_n {
                 (evals[idx], evals[sibling_idx])
@@ -525,5 +570,22 @@ mod tests {
         
         // Final poly should be small
         assert!(proof.final_poly.len() <= config.final_degree * 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "FriConfig only supports log_domain_size <= 30")]
+    fn test_fri_config_rejects_oversized_canonic_domain() {
+        let _ = FriConfig::new(31);
+    }
+
+    #[test]
+    #[should_panic(expected = "FriProver only supports log_domain_size <= 30")]
+    fn test_fri_prover_rejects_manual_oversized_config() {
+        let _ = FriProver::new(FriConfig {
+            log_domain_size: 31,
+            folding_factor: 2,
+            num_queries: 10,
+            final_degree: 8,
+        });
     }
 }
