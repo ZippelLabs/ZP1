@@ -17,7 +17,9 @@
 //!
 //! This halves both the domain size and polynomial degree.
 
-use zp1_primitives::M31;
+use std::collections::HashMap;
+
+use zp1_primitives::{CirclePoint, M31};
 use crate::channel::ProverChannel;
 use crate::commitment::MerkleTree;
 
@@ -45,6 +47,17 @@ pub enum SecurityLevel {
     Bits128,
 }
 
+const MAX_FRI_CIRCLE_LOG_SIZE: usize = 30;
+
+#[inline]
+fn assert_supported_fri_log_size(log_domain_size: usize, context: &str) {
+    assert!(
+        log_domain_size <= MAX_FRI_CIRCLE_LOG_SIZE,
+        "{context} only supports log_domain_size <= {} because canonic Circle FRI requires CirclePoint::generator(log_domain_size + 1) <= 31",
+        MAX_FRI_CIRCLE_LOG_SIZE
+    );
+}
+
 impl FriConfig {
     /// Create a default FRI configuration (100-bit security).
     pub fn new(log_domain_size: usize) -> Self {
@@ -53,6 +66,7 @@ impl FriConfig {
     
     /// Create a FRI configuration with specified security level.
     pub fn with_security(log_domain_size: usize, level: SecurityLevel) -> Self {
+        assert_supported_fri_log_size(log_domain_size, "FriConfig");
         let num_queries = match level {
             SecurityLevel::Bits80 => 40,   // ~80 bits from FRI
             SecurityLevel::Bits100 => 50,  // ~100 bits from FRI  
@@ -69,6 +83,7 @@ impl FriConfig {
     
     /// Create a fast configuration for testing (reduced security).
     pub fn fast(log_domain_size: usize) -> Self {
+        assert_supported_fri_log_size(log_domain_size, "FriConfig");
         Self {
             log_domain_size,
             folding_factor: 2,
@@ -159,9 +174,44 @@ pub struct FriProver {
     config: FriConfig,
 }
 
+#[inline]
+fn fold_conjugate_pair(f_pos: M31, f_neg: M31, alpha: M31, y_i: M31, inv_two: M31) -> M31 {
+    let sum = f_pos + f_neg;
+    let diff = f_pos - f_neg;
+    if y_i.is_zero() {
+        sum * inv_two
+    } else {
+        sum * inv_two + alpha * diff * inv_two * y_i.inv()
+    }
+}
+
+#[inline]
+fn canonic_layer_generators(
+    layer_log_size: usize,
+    context: &str,
+) -> (usize, CirclePoint, CirclePoint) {
+    assert_supported_fri_log_size(layer_log_size, context);
+    assert!(layer_log_size > 0, "{context} requires layer_log_size > 0");
+
+    let half_n = 1usize << (layer_log_size - 1);
+    let initial = CirclePoint::generator(layer_log_size + 1);
+    let step = if layer_log_size == 1 {
+        CirclePoint::IDENTITY
+    } else {
+        CirclePoint::generator(layer_log_size - 1)
+    };
+    (half_n, initial, step)
+}
+
+#[inline]
+fn canonic_pair_y(initial: CirclePoint, step: CirclePoint, pair_idx: usize) -> M31 {
+    initial.mul(step.pow(pair_idx as u64)).y
+}
+
 impl FriProver {
     /// Create a new FRI prover with the given configuration.
     pub fn new(config: FriConfig) -> Self {
+        assert_supported_fri_log_size(config.log_domain_size, "FriProver");
         Self { config }
     }
 
@@ -221,53 +271,34 @@ impl FriProver {
 
     /// Circle FRI folding: fold polynomial using twin-coset structure.
     ///
-    /// For points at indices i and i + n/2 (which are twins on the circle),
-    /// we compute:
+    /// Evaluations come from the canonic coset domain where evals[i] and
+    /// evals[i + n/2] correspond to conjugate points (x, y) and (x, -y).
+    /// We compute:
     /// - f_folded[i] = (f[i] + f[i + n/2]) / 2 + alpha * (f[i] - f[i + n/2]) / (2 * y_i)
     ///
     /// This halves the domain size while maintaining the RS proximity property.
     fn fold_circle(&self, evals: &[M31], alpha: M31, layer: usize) -> Vec<M31> {
-        use zp1_primitives::CirclePoint;
-        
         let n = evals.len();
         let half_n = n / 2;
         let mut folded = Vec::with_capacity(half_n);
 
-        // Two inverse constant
-        let two = M31::new(2);
-        let inv_two = two.inv();
+        let inv_two = M31::new(2).inv();
 
-        // Get the circle domain generator for current layer
-        // Domain size at this layer = 2^(log_domain_size - layer)
         let layer_log_size = self.config.log_domain_size.saturating_sub(layer);
-        let generator = CirclePoint::generator(layer_log_size);
+        let (expected_half_n, initial, step) =
+            canonic_layer_generators(layer_log_size, "FRI folding");
+        debug_assert_eq!(expected_half_n, half_n);
 
+        let mut point = initial;
         for i in 0..half_n {
             let f_pos = evals[i];
             let f_neg = evals[i + half_n];
 
-            // Sum and difference
-            let sum = f_pos + f_neg;
-            let diff = f_pos - f_neg;
+            let y_i = point.y;
+            let folded_val = fold_conjugate_pair(f_pos, f_neg, alpha, y_i, inv_two);
 
-            // Get y-coordinate of domain point i
-            // point_i = generator^i
-            let point_i = generator.pow(i as u64);
-            let y_i = point_i.y;
-            
-            // Proper Circle FRI folding formula:
-            // f_folded = (sum / 2) + alpha * (diff / (2 * y_i))
-            // = (sum / 2) + alpha * diff * inv_two * y_i^(-1)
-            let folded_val = if y_i.is_zero() {
-                // Edge case: y = 0 means we're at (1,0) or (-1,0)
-                // Just use the sum part
-                sum * inv_two
-            } else {
-                let y_inv = y_i.inv();
-                sum * inv_two + alpha * diff * inv_two * y_inv
-            };
-            
             folded.push(folded_val);
+            point = point.mul(step);
         }
 
         folded
@@ -306,8 +337,8 @@ impl FriProver {
                         merkle_proof,
                     });
 
-                    // Update index for next layer (halve it)
-                    current_idx /= 2;
+                    // Folded index is the conjugate-pair index in the first half.
+                    current_idx %= n / 2;
                 }
 
                 FriQueryProof {
@@ -340,6 +371,20 @@ impl FriProver {
             self.config.num_queries,
             1 << self.config.log_domain_size,
         );
+        let inv_two = M31::new(2).inv();
+        let layer_geometry: Vec<_> = proof
+            .layer_commitments
+            .iter()
+            .enumerate()
+            .map(|(layer_idx, _)| {
+                canonic_layer_generators(
+                    self.config.log_domain_size.saturating_sub(layer_idx),
+                    "FRI verification",
+                )
+            })
+            .collect();
+        let mut layer_y_cache: Vec<HashMap<usize, M31>> =
+            (0..layer_geometry.len()).map(|_| HashMap::new()).collect();
         
         for (query_idx, query_proof) in proof.query_proofs.iter().enumerate() {
             if query_proof.index != query_indices[query_idx] {
@@ -363,13 +408,22 @@ impl FriProver {
                 
                 // Compute expected folded value for next layer
                 let alpha = challenges[layer_idx];
-                let inv_two = M31::new(2).inv();
-                let sum = layer_proof.value + layer_proof.sibling_value;
-                let diff = layer_proof.value - layer_proof.sibling_value;
-                let folded = sum * inv_two + alpha * diff * inv_two;
+                let (half_n, initial, step) = layer_geometry[layer_idx];
+
+                let pair_idx = current_idx % half_n;
+                let y_i = *layer_y_cache[layer_idx]
+                    .entry(pair_idx)
+                    .or_insert_with(|| canonic_pair_y(initial, step, pair_idx));
+
+                let (f_pos, f_neg) = if current_idx < half_n {
+                    (layer_proof.value, layer_proof.sibling_value)
+                } else {
+                    (layer_proof.sibling_value, layer_proof.value)
+                };
+                let folded = fold_conjugate_pair(f_pos, f_neg, alpha, y_i, inv_two);
                 
                 expected_value = Some(folded);
-                current_idx /= 2;
+                current_idx = pair_idx;
             }
             
             // Verify final value matches final polynomial evaluation
@@ -418,6 +472,37 @@ mod tests {
         // Verify folding is deterministic
         let folded2 = prover.fold_circle(&evals, alpha, 0);
         assert_eq!(folded, folded2);
+    }
+
+    #[test]
+    fn test_fri_fold_pair_index_orientation_invariant() {
+        let prover = FriProver::new(FriConfig::new(4));
+        let evals: Vec<M31> = (0..16).map(|i| M31::new((i * 17 + 9) as u32)).collect();
+        let alpha = M31::new(7);
+        let folded = prover.fold_circle(&evals, alpha, 0);
+
+        let n = evals.len();
+        let half_n = n / 2;
+        let inv_two = M31::new(2).inv();
+        let (_, initial, step) = canonic_layer_generators(4, "FRI test");
+
+        for idx in 0..n {
+            let pair_idx = idx % half_n;
+            let sibling_idx = (idx + half_n) % n;
+            let y_i = canonic_pair_y(initial, step, pair_idx);
+
+            let (f_pos, f_neg) = if idx < half_n {
+                (evals[idx], evals[sibling_idx])
+            } else {
+                (evals[sibling_idx], evals[idx])
+            };
+
+            let folded_val = fold_conjugate_pair(f_pos, f_neg, alpha, y_i, inv_two);
+            assert_eq!(
+                folded_val, folded[pair_idx],
+                "Fold mismatch for idx {idx} (pair_idx {pair_idx})"
+            );
+        }
     }
 
     #[test]
@@ -485,5 +570,22 @@ mod tests {
         
         // Final poly should be small
         assert!(proof.final_poly.len() <= config.final_degree * 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "FriConfig only supports log_domain_size <= 30")]
+    fn test_fri_config_rejects_oversized_canonic_domain() {
+        let _ = FriConfig::new(31);
+    }
+
+    #[test]
+    #[should_panic(expected = "FriProver only supports log_domain_size <= 30")]
+    fn test_fri_prover_rejects_manual_oversized_config() {
+        let _ = FriProver::new(FriConfig {
+            log_domain_size: 31,
+            folding_factor: 2,
+            num_queries: 10,
+            final_degree: 8,
+        });
     }
 }

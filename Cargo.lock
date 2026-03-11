@@ -5699,6 +5699,7 @@ dependencies = [
  "p3-matrix",
  "p3-mersenne-31",
  "rand 0.8.5",
+ "rayon",
  "serde",
 ]
 
