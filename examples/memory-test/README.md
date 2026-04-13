@@ -34,14 +34,12 @@ ZP1 uses **LogUp argument** for memory consistency:
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary memory-test.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove memory-test examples/memory-test/memory-test.bin
+cargo run --release -- prove --bin memory-test
 ```
 
 This demonstrates:

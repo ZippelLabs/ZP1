@@ -76,14 +76,13 @@ rustup component add llvm-tools-preview
 ```bash
 cd examples/fibonacci
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary fibonacci.bin
 ```
 
 ### Running with ZP1
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove fibonacci examples/fibonacci/fibonacci.bin
+# Run an example from the root directory (ZP1):
+cargo run --release -- prove --bin fibonacci
 ```
 
 ## Build All Examples

@@ -23,14 +23,12 @@ Demonstrates ZP1's accelerated SHA-256 precompile.
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary sha256.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove sha256 examples/sha256/sha256.bin
+cargo run --release -- prove --bin sha256
 ```
 
 This demonstrates:
