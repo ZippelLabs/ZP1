@@ -547,6 +547,38 @@ impl CpuAir {
         out.push(half - reconstructed);
     }
 
+    #[inline]
+    fn push_word_byte_reconstruction_constraints(
+        word_lo: M31,
+        word_hi: M31,
+        bytes: &[M31; 4],
+        byte_bits: &[[M31; 8]; 4],
+        out: &mut Vec<M31>,
+    ) {
+        let two_8 = M31::new(1 << 8);
+
+        for i in 0..4 {
+            Self::push_byte_decomposition_constraints(bytes[i], &byte_bits[i], out);
+        }
+
+        out.push(word_lo - (bytes[0] + bytes[1] * two_8));
+        out.push(word_hi - (bytes[2] + bytes[3] * two_8));
+    }
+
+    #[inline]
+    fn push_word_half_reconstruction_constraints(
+        word_lo: M31,
+        word_hi: M31,
+        halves: &[M31; 2],
+        half_bits: &[[M31; 16]; 2],
+        out: &mut Vec<M31>,
+    ) {
+        Self::push_halfword_decomposition_constraints(halves[0], &half_bits[0], out);
+        Self::push_halfword_decomposition_constraints(halves[1], &half_bits[1], out);
+        out.push(word_lo - halves[0]);
+        out.push(word_hi - halves[1]);
+    }
+
     /// Evaluate LB (Load Byte) constraint.
     /// rd = sign_extend(mem[addr][7:0])
     ///
@@ -558,7 +590,8 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring correct byte extraction and sign extension
     pub fn load_byte_constraint(
-        mem_value: M31,
+        mem_val_lo: M31,
+        mem_val_hi: M31,
         byte_offset: M31,
         rd_val_lo: M31,
         rd_val_hi: M31,
@@ -582,17 +615,13 @@ impl CpuAir {
         let b2 = mem_bytes[2];
         let b3 = mem_bytes[3];
 
-        let two_8 = M31::new(1 << 8);
-        let two_16 = M31::new(1 << 16);
-        let two_24 = M31::new(1 << 24);
-
-        let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
-        constraints.push(mem_value - reconstruction);
-
-        Self::push_byte_decomposition_constraints(b0, &mem_byte_bits[0], &mut constraints);
-        Self::push_byte_decomposition_constraints(b1, &mem_byte_bits[1], &mut constraints);
-        Self::push_byte_decomposition_constraints(b2, &mem_byte_bits[2], &mut constraints);
-        Self::push_byte_decomposition_constraints(b3, &mem_byte_bits[3], &mut constraints);
+        Self::push_word_byte_reconstruction_constraints(
+            mem_val_lo,
+            mem_val_hi,
+            mem_bytes,
+            mem_byte_bits,
+            &mut constraints,
+        );
 
         // 2. Decompose byte_offset into 2 bits
         // byte_offset = off0 + 2*off1
@@ -654,7 +683,8 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring correct halfword extraction and sign extension
     pub fn load_halfword_constraint(
-        mem_value: M31,
+        mem_val_lo: M31,
+        mem_val_hi: M31,
         half_offset: M31, // 0 or 1
         rd_val_lo: M31,
         rd_val_hi: M31,
@@ -670,13 +700,13 @@ impl CpuAir {
         // mem_value = h0 + h1 * 2^16
         let h0 = mem_halves[0];
         let h1 = mem_halves[1];
-        let two_16 = M31::new(1 << 16);
-
-        let reconstruction = h0 + h1 * two_16;
-        constraints.push(mem_value - reconstruction);
-
-        Self::push_halfword_decomposition_constraints(h0, &mem_half_bits[0], &mut constraints);
-        Self::push_halfword_decomposition_constraints(h1, &mem_half_bits[1], &mut constraints);
+        Self::push_word_half_reconstruction_constraints(
+            mem_val_lo,
+            mem_val_hi,
+            mem_halves,
+            mem_half_bits,
+            &mut constraints,
+        );
 
         // 2. Decompose half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
@@ -749,7 +779,8 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring correct byte extraction and zero extension
     pub fn load_byte_unsigned_constraint(
-        mem_value: M31,
+        mem_val_lo: M31,
+        mem_val_hi: M31,
         byte_offset: M31,
         rd_val_lo: M31,
         rd_val_hi: M31,
@@ -768,17 +799,13 @@ impl CpuAir {
         let b2 = mem_bytes[2];
         let b3 = mem_bytes[3];
 
-        let two_8 = M31::new(1 << 8);
-        let two_16 = M31::new(1 << 16);
-        let two_24 = M31::new(1 << 24);
-
-        let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
-        constraints.push(mem_value - reconstruction);
-
-        Self::push_byte_decomposition_constraints(b0, &mem_byte_bits[0], &mut constraints);
-        Self::push_byte_decomposition_constraints(b1, &mem_byte_bits[1], &mut constraints);
-        Self::push_byte_decomposition_constraints(b2, &mem_byte_bits[2], &mut constraints);
-        Self::push_byte_decomposition_constraints(b3, &mem_byte_bits[3], &mut constraints);
+        Self::push_word_byte_reconstruction_constraints(
+            mem_val_lo,
+            mem_val_hi,
+            mem_bytes,
+            mem_byte_bits,
+            &mut constraints,
+        );
 
         // 2. Decompose byte_offset into 2 bits
         let off0 = offset_bits[0];
@@ -824,7 +851,8 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring correct halfword extraction and zero extension
     pub fn load_halfword_unsigned_constraint(
-        mem_value: M31,
+        mem_val_lo: M31,
+        mem_val_hi: M31,
         half_offset: M31, // 0 or 1
         rd_val_lo: M31,
         rd_val_hi: M31,
@@ -839,13 +867,13 @@ impl CpuAir {
         // mem_value = h0 + h1 * 2^16
         let h0 = mem_halves[0];
         let h1 = mem_halves[1];
-        let two_16 = M31::new(1 << 16);
-
-        let reconstruction = h0 + h1 * two_16;
-        constraints.push(mem_value - reconstruction);
-
-        Self::push_halfword_decomposition_constraints(h0, &mem_half_bits[0], &mut constraints);
-        Self::push_halfword_decomposition_constraints(h1, &mem_half_bits[1], &mut constraints);
+        Self::push_word_half_reconstruction_constraints(
+            mem_val_lo,
+            mem_val_hi,
+            mem_halves,
+            mem_half_bits,
+            &mut constraints,
+        );
 
         // 2. Decompose half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
@@ -888,37 +916,37 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring only target byte is modified
     pub fn store_byte_constraint(
-        old_mem_value: M31,
-        new_mem_value: M31,
+        old_mem_lo: M31,
+        old_mem_hi: M31,
+        new_mem_lo: M31,
+        new_mem_hi: M31,
         byte_to_store: M31,
         byte_to_store_bits: &[M31; 8],
         byte_offset: M31,
         // Witnesses
         old_mem_bytes: &[M31; 4],
         old_mem_byte_bits: &[[M31; 8]; 4],
+        new_mem_bytes: &[M31; 4],
+        new_mem_byte_bits: &[[M31; 8]; 4],
         offset_bits: &[M31; 2],
-        witness_old_byte: M31,
-        witness_scale: M31,
+        offset_selectors: &[M31; 4],
     ) -> Vec<M31> {
         let mut constraints = Vec::new();
 
-        // 1. Decompose old_mem_value into bytes
-        let b0 = old_mem_bytes[0];
-        let b1 = old_mem_bytes[1];
-        let b2 = old_mem_bytes[2];
-        let b3 = old_mem_bytes[3];
-
-        let two_8 = M31::new(1 << 8);
-        let two_16 = M31::new(1 << 16);
-        let two_24 = M31::new(1 << 24);
-
-        let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
-        constraints.push(old_mem_value - reconstruction);
-
-        Self::push_byte_decomposition_constraints(b0, &old_mem_byte_bits[0], &mut constraints);
-        Self::push_byte_decomposition_constraints(b1, &old_mem_byte_bits[1], &mut constraints);
-        Self::push_byte_decomposition_constraints(b2, &old_mem_byte_bits[2], &mut constraints);
-        Self::push_byte_decomposition_constraints(b3, &old_mem_byte_bits[3], &mut constraints);
+        Self::push_word_byte_reconstruction_constraints(
+            old_mem_lo,
+            old_mem_hi,
+            old_mem_bytes,
+            old_mem_byte_bits,
+            &mut constraints,
+        );
+        Self::push_word_byte_reconstruction_constraints(
+            new_mem_lo,
+            new_mem_hi,
+            new_mem_bytes,
+            new_mem_byte_bits,
+            &mut constraints,
+        );
         Self::push_byte_decomposition_constraints(byte_to_store, byte_to_store_bits, &mut constraints);
 
         // 2. Decompose byte_offset
@@ -928,34 +956,27 @@ impl CpuAir {
         constraints.push(off1 * (off1 - M31::ONE));
         constraints.push(byte_offset - (off0 + off1 * M31::new(2)));
 
-        // 3. Verify witness_old_byte matches the byte at offset in old memory
-        // Selection:
-        // sel_lo = (1-off0)b0 + off0b1
-        // sel_hi = (1-off0)b2 + off0b3
-        // selected = (1-off1)sel_lo + off1sel_hi
-        let sel_lo = b0 + off0 * (b1 - b0);
-        let sel_hi = b2 + off0 * (b3 - b2);
-        let selected_byte = sel_lo + off1 * (sel_hi - sel_lo);
+        // 3. Verify one-hot byte selectors from offset bits.
+        let expected_selectors = [
+            (M31::ONE - off0) * (M31::ONE - off1),
+            off0 * (M31::ONE - off1),
+            (M31::ONE - off0) * off1,
+            off0 * off1,
+        ];
 
-        constraints.push(witness_old_byte - selected_byte);
+        let mut selector_sum = M31::ZERO;
+        for i in 0..4 {
+            let selector = offset_selectors[i];
+            constraints.push(selector * (selector - M31::ONE));
+            constraints.push(selector - expected_selectors[i]);
+            selector_sum = selector_sum + selector;
 
-        // 4. Verify witness_scale matches 2^(8 * offset)
-        // scales = [1, 2^8, 2^16, 2^24]
-        // s0 = 1, s1 = 2^8, s2 = 2^16, s3 = 2^24
-        // scale_lo = (1-off0)*1 + off0*2^8
-        // scale_hi = (1-off0)*2^16 + off0*2^24
-        // scale = (1-off1)scale_lo + off1*scale_hi
-        let scale_lo = M31::ONE + off0 * (two_8 - M31::ONE);
-        let scale_hi = two_16 + off0 * (two_24 - two_16);
-        let selected_scale = scale_lo + off1 * (scale_hi - scale_lo);
-
-        constraints.push(witness_scale - selected_scale);
-
-        // 5. Verify Memory Update
-        // new_mem = old_mem + (byte_to_store - old_byte) * scale
-        // This effectively replaces the old byte with the new byte at the correct position
-        let update_check = old_mem_value + (byte_to_store - witness_old_byte) * witness_scale;
-        constraints.push(new_mem_value - update_check);
+            // If this byte is selected, it must equal byte_to_store.
+            // Otherwise it must equal the old byte.
+            constraints.push(selector * (new_mem_bytes[i] - byte_to_store));
+            constraints.push((M31::ONE - selector) * (new_mem_bytes[i] - old_mem_bytes[i]));
+        }
+        constraints.push(selector_sum - M31::ONE);
 
         constraints
     }
@@ -972,47 +993,50 @@ impl CpuAir {
     /// # Returns
     /// Constraint ensuring only target halfword is modified
     pub fn store_halfword_constraint(
-        old_mem_value: M31,
-        new_mem_value: M31,
+        old_mem_lo: M31,
+        old_mem_hi: M31,
+        new_mem_lo: M31,
+        new_mem_hi: M31,
         half_to_store: M31,
         half_to_store_bits: &[M31; 16],
         half_offset: M31, // 0 or 1
         // Witnesses
         old_mem_halves: &[M31; 2],
         old_mem_half_bits: &[[M31; 16]; 2],
-        witness_old_half: M31,
+        new_mem_halves: &[M31; 2],
+        new_mem_half_bits: &[[M31; 16]; 2],
     ) -> Vec<M31> {
         let mut constraints = Vec::new();
 
         // 1. Decompose old_mem_value into halfwords
         let h0 = old_mem_halves[0];
         let h1 = old_mem_halves[1];
-        let two_16 = M31::new(1 << 16);
 
-        let reconstruction = h0 + h1 * two_16;
-        constraints.push(old_mem_value - reconstruction);
-
-        Self::push_halfword_decomposition_constraints(h0, &old_mem_half_bits[0], &mut constraints);
-        Self::push_halfword_decomposition_constraints(h1, &old_mem_half_bits[1], &mut constraints);
+        Self::push_word_half_reconstruction_constraints(
+            old_mem_lo,
+            old_mem_hi,
+            old_mem_halves,
+            old_mem_half_bits,
+            &mut constraints,
+        );
+        Self::push_word_half_reconstruction_constraints(
+            new_mem_lo,
+            new_mem_hi,
+            new_mem_halves,
+            new_mem_half_bits,
+            &mut constraints,
+        );
         Self::push_halfword_decomposition_constraints(half_to_store, half_to_store_bits, &mut constraints);
 
         // 2. Validate half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
 
-        // 3. Select old halfword
-        // selected_half = h0 + offset * (h1 - h0)
-        let selected_half = h0 + half_offset * (h1 - h0);
-
-        constraints.push(witness_old_half - selected_half);
-
-        // 4. Verify Memory Update
-        // scale = 1 + offset * (2^16 - 1)
-        // If offset 0: scale = 1. If offset 1: scale = 2^16.
-        let scale = M31::ONE + half_offset * (two_16 - M31::ONE);
-
-        // new_mem = old_mem + (half_to_store - old_half) * scale
-        let update_check = old_mem_value + (half_to_store - witness_old_half) * scale;
-        constraints.push(new_mem_value - update_check);
+        // 3. If offset 0, replace low half and keep high half.
+        // If offset 1, keep low half and replace high half.
+        constraints.push((M31::ONE - half_offset) * (new_mem_halves[0] - half_to_store));
+        constraints.push((M31::ONE - half_offset) * (new_mem_halves[1] - h1));
+        constraints.push(half_offset * (new_mem_halves[0] - h0));
+        constraints.push(half_offset * (new_mem_halves[1] - half_to_store));
 
         constraints
     }
@@ -2087,6 +2111,35 @@ mod tests {
         )
     }
 
+    fn u32_to_bytes(value: u32) -> [u32; 4] {
+        [
+            value & 0xFF,
+            (value >> 8) & 0xFF,
+            (value >> 16) & 0xFF,
+            (value >> 24) & 0xFF,
+        ]
+    }
+
+    fn u32_to_halves(value: u32) -> [u32; 2] {
+        [value & 0xFFFF, (value >> 16) & 0xFFFF]
+    }
+
+    fn m31_bytes(bytes: [u32; 4]) -> [M31; 4] {
+        std::array::from_fn(|i| M31::new(bytes[i]))
+    }
+
+    fn m31_halves(halves: [u32; 2]) -> [M31; 2] {
+        std::array::from_fn(|i| M31::new(halves[i]))
+    }
+
+    fn byte_bits(bytes: [u32; 4]) -> [[M31; 8]; 4] {
+        std::array::from_fn(|i| u8_bits_m31(bytes[i]))
+    }
+
+    fn half_bits(halves: [u32; 2]) -> [[M31; 16]; 2] {
+        std::array::from_fn(|i| u16_bits_m31(halves[i]))
+    }
+
     #[test]
     fn test_bit_decomposition_valid() {
         // Test with value 0x12345678
@@ -2969,22 +3022,11 @@ mod tests {
         // offset 1 -> 0xF6 (negative) -> 0xFFFFFFF6
 
         let mem_u32 = 0x1234F678u32;
-        let mem_value = M31::new(mem_u32);
+        let (mem_lo, mem_hi) = u32_to_limbs(mem_u32);
 
-        let mem_bytes_u32 = [
-            mem_u32 & 0xFF,
-            (mem_u32 >> 8) & 0xFF,
-            (mem_u32 >> 16) & 0xFF,
-            (mem_u32 >> 24) & 0xFF,
-        ];
-        let mem_bytes: [M31; 4] = [
-            M31::new(mem_bytes_u32[0]),
-            M31::new(mem_bytes_u32[1]),
-            M31::new(mem_bytes_u32[2]),
-            M31::new(mem_bytes_u32[3]),
-        ];
-        let mem_byte_bits: [[M31; 8]; 4] =
-            std::array::from_fn(|i| u8_bits_m31(mem_bytes_u32[i]));
+        let mem_bytes_u32 = u32_to_bytes(mem_u32);
+        let mem_bytes = m31_bytes(mem_bytes_u32);
+        let mem_byte_bits = byte_bits(mem_bytes_u32);
 
         // Case 1: Load byte 0 (0x78) - Positive
         {
@@ -3005,7 +3047,8 @@ mod tests {
             let sel_hi = mem_bytes[2];
 
             let constraints = CpuAir::load_byte_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
@@ -3039,7 +3082,8 @@ mod tests {
             let sel_hi = mem_bytes[3];
 
             let constraints = CpuAir::load_byte_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
@@ -3110,18 +3154,11 @@ mod tests {
         // offset 1 -> 0x1234 (positive, 0x1234) -> 0x00001234
 
         let mem_u32 = 0x1234F678u32;
-        let mem_value = M31::new(mem_u32);
+        let (mem_lo, mem_hi) = u32_to_limbs(mem_u32);
 
-        let mem_halves_u32 = [
-            mem_u32 & 0xFFFF,
-            (mem_u32 >> 16) & 0xFFFF,
-        ];
-        let mem_halves: [M31; 2] = [
-            M31::new(mem_halves_u32[0]),
-            M31::new(mem_halves_u32[1]),
-        ];
-        let mem_half_bits: [[M31; 16]; 2] =
-            std::array::from_fn(|i| u16_bits_m31(mem_halves_u32[i]));
+        let mem_halves_u32 = u32_to_halves(mem_u32);
+        let mem_halves = m31_halves(mem_halves_u32);
+        let mem_half_bits = half_bits(mem_halves_u32);
 
         // Case 1: Load half 0 (0xF678) - Negative
         {
@@ -3138,7 +3175,8 @@ mod tests {
             }
 
             let constraints = CpuAir::load_halfword_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
@@ -3165,7 +3203,8 @@ mod tests {
             }
 
             let constraints = CpuAir::load_halfword_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
@@ -3187,22 +3226,11 @@ mod tests {
         // offset 1 -> 0xF6 -> 0x000000F6 (Zero extended, NOT signed)
 
         let mem_u32 = 0x1234F678u32;
-        let mem_value = M31::new(mem_u32);
+        let (mem_lo, mem_hi) = u32_to_limbs(mem_u32);
 
-        let mem_bytes_u32 = [
-            mem_u32 & 0xFF,
-            (mem_u32 >> 8) & 0xFF,
-            (mem_u32 >> 16) & 0xFF,
-            (mem_u32 >> 24) & 0xFF,
-        ];
-        let mem_bytes: [M31; 4] = [
-            M31::new(mem_bytes_u32[0]),
-            M31::new(mem_bytes_u32[1]),
-            M31::new(mem_bytes_u32[2]),
-            M31::new(mem_bytes_u32[3]),
-        ];
-        let mem_byte_bits: [[M31; 8]; 4] =
-            std::array::from_fn(|i| u8_bits_m31(mem_bytes_u32[i]));
+        let mem_bytes_u32 = u32_to_bytes(mem_u32);
+        let mem_bytes = m31_bytes(mem_bytes_u32);
+        let mem_byte_bits = byte_bits(mem_bytes_u32);
 
         // Case 1: Load byte 1 (0xF6) - Negative byte but Unsigned Load
         {
@@ -3220,7 +3248,8 @@ mod tests {
             let sel_hi = mem_bytes[3];
 
             let constraints = CpuAir::load_byte_unsigned_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
@@ -3237,6 +3266,38 @@ mod tests {
     }
 
     #[test]
+    fn test_load_byte_rejects_m31_word_collision() {
+        // 0 and 0x7fffffff are equal as one M31 field element, but they are
+        // different RV32 words. The byte gadget must bind bytes to 16-bit
+        // word limbs, not to one full-word field element modulo p.
+        let (mem_lo, mem_hi) = u32_to_limbs(0);
+        let colliding_word = 0x7FFF_FFFFu32;
+        let colliding_bytes_u32 = u32_to_bytes(colliding_word);
+        let colliding_bytes = m31_bytes(colliding_bytes_u32);
+        let colliding_byte_bits = byte_bits(colliding_bytes_u32);
+        let byte_bits = u8_bits_m31(colliding_bytes_u32[0]);
+        let offset_bits = [M31::ZERO, M31::ZERO];
+
+        let constraints = CpuAir::load_byte_unsigned_constraint(
+            mem_lo,
+            mem_hi,
+            M31::ZERO,
+            M31::new(colliding_bytes_u32[0]),
+            M31::ZERO,
+            &colliding_bytes,
+            &colliding_byte_bits,
+            &offset_bits,
+            &byte_bits,
+            (colliding_bytes[0], colliding_bytes[2]),
+        );
+
+        assert!(
+            constraints.iter().any(|&c| c != M31::ZERO),
+            "LBU accepted bytes for a different 32-bit word that collides modulo M31"
+        );
+    }
+
+    #[test]
     fn test_store_byte_full() {
         // Test SB: mem[addr] = rs2[7:0]
         // Old Mem: 0x1234F678
@@ -3244,10 +3305,10 @@ mod tests {
         // New Mem: 0x1234AB78
 
         let old_u32 = 0x1234F678u32;
-        let old_val = M31::new(old_u32);
+        let (old_lo, old_hi) = u32_to_limbs(old_u32);
 
         let new_u32 = 0x1234AB78u32;
-        let new_val = M31::new(new_u32);
+        let (new_lo, new_hi) = u32_to_limbs(new_u32);
 
         let byte_to_store_val = 0xABu32;
         let byte_to_store = M31::new(byte_to_store_val);
@@ -3256,38 +3317,31 @@ mod tests {
         let offset_val = 1;
 
         // Witnesses
-        let old_bytes_u32 = [
-            old_u32 & 0xFF,
-            (old_u32 >> 8) & 0xFF,
-            (old_u32 >> 16) & 0xFF,
-            (old_u32 >> 24) & 0xFF,
-        ];
-        let old_mem_bytes: [M31; 4] = [
-            M31::new(old_bytes_u32[0]),
-            M31::new(old_bytes_u32[1]),
-            M31::new(old_bytes_u32[2]),
-            M31::new(old_bytes_u32[3]),
-        ];
-        let old_mem_byte_bits: [[M31; 8]; 4] =
-            std::array::from_fn(|i| u8_bits_m31(old_bytes_u32[i]));
+        let old_bytes_u32 = u32_to_bytes(old_u32);
+        let old_mem_bytes = m31_bytes(old_bytes_u32);
+        let old_mem_byte_bits = byte_bits(old_bytes_u32);
+        let new_bytes_u32 = u32_to_bytes(new_u32);
+        let new_mem_bytes = m31_bytes(new_bytes_u32);
+        let new_mem_byte_bits = byte_bits(new_bytes_u32);
         let byte_to_store_bits = u8_bits_m31(byte_to_store_val);
 
         let offset_bits = [M31::ONE, M31::ZERO]; // 1 = 1 + 2*0
-
-        let witness_old_byte = old_mem_bytes[1]; // 0xF6
-        let witness_scale = M31::new(1 << 8);    // 2^8 for offset 1
+        let offset_selectors = [M31::ZERO, M31::ONE, M31::ZERO, M31::ZERO];
 
         let constraints = CpuAir::store_byte_constraint(
-            old_val,
-            new_val,
+            old_lo,
+            old_hi,
+            new_lo,
+            new_hi,
             byte_to_store,
             &byte_to_store_bits,
             M31::new(offset_val),
             &old_mem_bytes,
             &old_mem_byte_bits,
+            &new_mem_bytes,
+            &new_mem_byte_bits,
             &offset_bits,
-            witness_old_byte,
-            witness_scale,
+            &offset_selectors,
         );
 
         for c in constraints {
@@ -3303,10 +3357,10 @@ mod tests {
         // New Mem: 0xABCDF678
 
         let old_u32 = 0x1234F678u32;
-        let old_val = M31::new(old_u32);
+        let (old_lo, old_hi) = u32_to_limbs(old_u32);
 
         let new_u32 = 0xABCDF678u32;
-        let new_val = M31::new(new_u32);
+        let (new_lo, new_hi) = u32_to_limbs(new_u32);
 
         let half_to_store_val = 0xABCDu32;
         let half_to_store = M31::new(half_to_store_val);
@@ -3315,29 +3369,26 @@ mod tests {
         let offset_val = 1;
 
         // Witnesses
-        let old_halves_u32 = [
-            old_u32 & 0xFFFF,
-            (old_u32 >> 16) & 0xFFFF,
-        ];
-        let old_mem_halves: [M31; 2] = [
-            M31::new(old_halves_u32[0]),
-            M31::new(old_halves_u32[1]),
-        ];
-        let old_mem_half_bits: [[M31; 16]; 2] =
-            std::array::from_fn(|i| u16_bits_m31(old_halves_u32[i]));
+        let old_halves_u32 = u32_to_halves(old_u32);
+        let old_mem_halves = m31_halves(old_halves_u32);
+        let old_mem_half_bits = half_bits(old_halves_u32);
+        let new_halves_u32 = u32_to_halves(new_u32);
+        let new_mem_halves = m31_halves(new_halves_u32);
+        let new_mem_half_bits = half_bits(new_halves_u32);
         let half_to_store_bits = u16_bits_m31(half_to_store_val);
 
-        let witness_old_half = old_mem_halves[1]; // 0x1234
-
         let constraints = CpuAir::store_halfword_constraint(
-            old_val,
-            new_val,
+            old_lo,
+            old_hi,
+            new_lo,
+            new_hi,
             half_to_store,
             &half_to_store_bits,
             M31::new(offset_val),
             &old_mem_halves,
             &old_mem_half_bits,
-            witness_old_half,
+            &new_mem_halves,
+            &new_mem_half_bits,
         );
 
         for c in constraints {
@@ -3352,18 +3403,11 @@ mod tests {
         // offset 0 -> 0xF678 -> 0x0000F678 (Zero extended, NOT signed 0xFFFFF678)
 
         let mem_u32 = 0x1234F678u32;
-        let mem_value = M31::new(mem_u32);
+        let (mem_lo, mem_hi) = u32_to_limbs(mem_u32);
 
-        let mem_halves_u32 = [
-            mem_u32 & 0xFFFF,
-            (mem_u32 >> 16) & 0xFFFF,
-        ];
-        let mem_halves: [M31; 2] = [
-            M31::new(mem_halves_u32[0]),
-            M31::new(mem_halves_u32[1]),
-        ];
-        let mem_half_bits: [[M31; 16]; 2] =
-            std::array::from_fn(|i| u16_bits_m31(mem_halves_u32[i]));
+        let mem_halves_u32 = u32_to_halves(mem_u32);
+        let mem_halves = m31_halves(mem_halves_u32);
+        let mem_half_bits = half_bits(mem_halves_u32);
 
         // Case 1: Load half 0 (0xF678) - Negative if signed, but here Unsigned
         {
@@ -3380,7 +3424,8 @@ mod tests {
             }
 
             let constraints = CpuAir::load_halfword_unsigned_constraint(
-                mem_value,
+                mem_lo,
+                mem_hi,
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
