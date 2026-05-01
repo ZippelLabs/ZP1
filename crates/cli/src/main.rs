@@ -251,6 +251,10 @@ fn main() {
     
     match cli.command {
         Commands::Prove { bin, input_file, output_dir, until, gpu, max_steps, blowup, queries } => {
+            let bin = if !bin.exists() {
+                let candidate = PathBuf::from("examples/target/riscv32im-unknown-none-elf/release").join(&bin);
+                if candidate.exists() { candidate } else { bin }
+            } else { bin };
             prove_command(&bin, input_file.as_ref(), &output_dir, until.as_ref(), gpu, max_steps, blowup, queries);
         }
         Commands::ProveFinal { input_file, mode, gpu, output_dir } => {

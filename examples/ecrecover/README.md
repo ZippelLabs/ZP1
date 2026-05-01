@@ -27,14 +27,12 @@ The implementation supports:
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary ecrecover.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove ecrecover examples/ecrecover/ecrecover.bin
+cargo run --release -- prove --bin ecrecover
 ```
 
 ## Use Cases

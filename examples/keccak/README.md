@@ -23,14 +23,12 @@ Demonstrates ZP1's accelerated Keccak-256 precompile using delegation.
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary keccak.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove keccak examples/keccak/keccak.bin
+cargo run --release -- prove --bin keccak
 ```
 
 This demonstrates:

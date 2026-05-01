@@ -10,14 +10,12 @@ The 10th Fibonacci number is **55**.
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary fibonacci.bin
 ```
 
 ## Testing with ZP1
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove fibonacci examples/fibonacci/fibonacci.bin
+cargo run --release -- prove --bin fibonacci
 ```
 
 ## What It Does
