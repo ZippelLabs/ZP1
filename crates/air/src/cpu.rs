@@ -523,6 +523,30 @@ impl CpuAir {
         (c_lo, c_hi)
     }
 
+    #[inline]
+    fn push_byte_decomposition_constraints(byte: M31, bits: &[M31; 8], out: &mut Vec<M31>) {
+        let mut reconstructed = M31::ZERO;
+        let mut pow = M31::ONE;
+        for &bit in bits {
+            out.push(bit * (bit - M31::ONE));
+            reconstructed = reconstructed + bit * pow;
+            pow = pow + pow;
+        }
+        out.push(byte - reconstructed);
+    }
+
+    #[inline]
+    fn push_halfword_decomposition_constraints(half: M31, bits: &[M31; 16], out: &mut Vec<M31>) {
+        let mut reconstructed = M31::ZERO;
+        let mut pow = M31::ONE;
+        for &bit in bits {
+            out.push(bit * (bit - M31::ONE));
+            reconstructed = reconstructed + bit * pow;
+            pow = pow + pow;
+        }
+        out.push(half - reconstructed);
+    }
+
     /// Evaluate LB (Load Byte) constraint.
     /// rd = sign_extend(mem[addr][7:0])
     /// 
@@ -540,6 +564,8 @@ impl CpuAir {
         rd_val_hi: M31,
         // Witnesses
         mem_bytes: &[M31; 4],   // Decomposition of mem_value into 4 bytes
+        // Witness: each unpacked byte is in [0, 255]
+        mem_byte_bits: &[[M31; 8]; 4],
         offset_bits: &[M31; 2], // Decomposition of byte_offset (2 bits)
         byte_bits: &[M31; 8],   // Decomposition of the selected byte (8 bits)
         // Intermediate values for selections to keep degree <= 2
@@ -550,7 +576,7 @@ impl CpuAir {
         let mut constraints = Vec::new();
 
         // 1. Decompose mem_value into bytes
-        // mem_value = b0 + b1*2^8 + b2*16 + b3*24
+        // mem_value = b0 + b1*2^8 + b2*2^16 + b3*2^24
         let b0 = mem_bytes[0];
         let b1 = mem_bytes[1];
         let b2 = mem_bytes[2];
@@ -562,6 +588,11 @@ impl CpuAir {
 
         let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
         constraints.push(mem_value - reconstruction);
+
+        Self::push_byte_decomposition_constraints(b0, &mem_byte_bits[0], &mut constraints);
+        Self::push_byte_decomposition_constraints(b1, &mem_byte_bits[1], &mut constraints);
+        Self::push_byte_decomposition_constraints(b2, &mem_byte_bits[2], &mut constraints);
+        Self::push_byte_decomposition_constraints(b3, &mem_byte_bits[3], &mut constraints);
 
         // 2. Decompose byte_offset into 2 bits
         // byte_offset = off0 + 2*off1
@@ -629,6 +660,8 @@ impl CpuAir {
         rd_val_hi: M31,
         // Witnesses
         mem_halves: &[M31; 2],  // Decomposition of mem_value into 2 halfwords (16 bits each)
+        // Witness: each unpacked halfword is in [0, 65535]
+        mem_half_bits: &[[M31; 16]; 2],
         half_bits: &[M31; 16],  // Decomposition of selected halfword for sign check
     ) -> Vec<M31> {
         let mut constraints = Vec::new();
@@ -641,6 +674,9 @@ impl CpuAir {
         
         let reconstruction = h0 + h1 * two_16;
         constraints.push(mem_value - reconstruction);
+
+        Self::push_halfword_decomposition_constraints(h0, &mem_half_bits[0], &mut constraints);
+        Self::push_halfword_decomposition_constraints(h1, &mem_half_bits[1], &mut constraints);
 
         // 2. Decompose half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
@@ -719,6 +755,7 @@ impl CpuAir {
         rd_val_hi: M31,
         // Witnesses
         mem_bytes: &[M31; 4],
+        mem_byte_bits: &[[M31; 8]; 4],
         offset_bits: &[M31; 2],
         byte_bits: &[M31; 8],   // Still needed to verify range check (0-255)
         selector_intermediates: (M31, M31),
@@ -737,6 +774,11 @@ impl CpuAir {
 
         let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
         constraints.push(mem_value - reconstruction);
+
+        Self::push_byte_decomposition_constraints(b0, &mem_byte_bits[0], &mut constraints);
+        Self::push_byte_decomposition_constraints(b1, &mem_byte_bits[1], &mut constraints);
+        Self::push_byte_decomposition_constraints(b2, &mem_byte_bits[2], &mut constraints);
+        Self::push_byte_decomposition_constraints(b3, &mem_byte_bits[3], &mut constraints);
 
         // 2. Decompose byte_offset into 2 bits
         let off0 = offset_bits[0];
@@ -788,6 +830,7 @@ impl CpuAir {
         rd_val_hi: M31,
         // Witnesses
         mem_halves: &[M31; 2],  // Decomposition of mem_value into 2 halfwords
+        mem_half_bits: &[[M31; 16]; 2],
         half_bits: &[M31; 16],  // Decomposition of selected halfword for range check
     ) -> Vec<M31> {
         let mut constraints = Vec::new();
@@ -800,6 +843,9 @@ impl CpuAir {
         
         let reconstruction = h0 + h1 * two_16;
         constraints.push(mem_value - reconstruction);
+
+        Self::push_halfword_decomposition_constraints(h0, &mem_half_bits[0], &mut constraints);
+        Self::push_halfword_decomposition_constraints(h1, &mem_half_bits[1], &mut constraints);
 
         // 2. Decompose half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
@@ -845,9 +891,11 @@ impl CpuAir {
         old_mem_value: M31,
         new_mem_value: M31,
         byte_to_store: M31,
+        byte_to_store_bits: &[M31; 8],
         byte_offset: M31,
         // Witnesses
         old_mem_bytes: &[M31; 4],
+        old_mem_byte_bits: &[[M31; 8]; 4],
         offset_bits: &[M31; 2],
         witness_old_byte: M31,
         witness_scale: M31,
@@ -866,6 +914,12 @@ impl CpuAir {
 
         let reconstruction = b0 + b1 * two_8 + b2 * two_16 + b3 * two_24;
         constraints.push(old_mem_value - reconstruction);
+
+        Self::push_byte_decomposition_constraints(b0, &old_mem_byte_bits[0], &mut constraints);
+        Self::push_byte_decomposition_constraints(b1, &old_mem_byte_bits[1], &mut constraints);
+        Self::push_byte_decomposition_constraints(b2, &old_mem_byte_bits[2], &mut constraints);
+        Self::push_byte_decomposition_constraints(b3, &old_mem_byte_bits[3], &mut constraints);
+        Self::push_byte_decomposition_constraints(byte_to_store, byte_to_store_bits, &mut constraints);
 
         // 2. Decompose byte_offset
         let off0 = offset_bits[0];
@@ -921,9 +975,11 @@ impl CpuAir {
         old_mem_value: M31,
         new_mem_value: M31,
         half_to_store: M31,
+        half_to_store_bits: &[M31; 16],
         half_offset: M31, // 0 or 1
         // Witnesses
         old_mem_halves: &[M31; 2],
+        old_mem_half_bits: &[[M31; 16]; 2],
         witness_old_half: M31,
     ) -> Vec<M31> {
         let mut constraints = Vec::new();
@@ -935,6 +991,10 @@ impl CpuAir {
         
         let reconstruction = h0 + h1 * two_16;
         constraints.push(old_mem_value - reconstruction);
+
+        Self::push_halfword_decomposition_constraints(h0, &old_mem_half_bits[0], &mut constraints);
+        Self::push_halfword_decomposition_constraints(h1, &old_mem_half_bits[1], &mut constraints);
+        Self::push_halfword_decomposition_constraints(half_to_store, half_to_store_bits, &mut constraints);
 
         // 2. Validate half_offset (must be 0 or 1)
         constraints.push(half_offset * (half_offset - M31::ONE));
@@ -1984,6 +2044,28 @@ mod tests {
         (M31::new(lo), M31::new(hi))
     }
 
+    fn u8_bits_m31(byte: u32) -> [M31; 8] {
+        let b = byte & 0xFF;
+        std::array::from_fn(|i| {
+            if (b >> i) & 1 == 1 {
+                M31::ONE
+            } else {
+                M31::ZERO
+            }
+        })
+    }
+
+    fn u16_bits_m31(half: u32) -> [M31; 16] {
+        let h = half & 0xFFFF;
+        std::array::from_fn(|i| {
+            if (h >> i) & 1 == 1 {
+                M31::ONE
+            } else {
+                M31::ZERO
+            }
+        })
+    }
+
     #[test]
     fn test_bit_decomposition_valid() {
         // Test with value 0x12345678
@@ -2880,6 +2962,8 @@ mod tests {
             M31::new(mem_bytes_u32[2]),
             M31::new(mem_bytes_u32[3]),
         ];
+        let mem_byte_bits: [[M31; 8]; 4] =
+            std::array::from_fn(|i| u8_bits_m31(mem_bytes_u32[i]));
 
         // Case 1: Load byte 0 (0x78) - Positive
         {
@@ -2904,6 +2988,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
+                &mem_byte_bits,
                 &offset_bits,
                 &byte_bits,
                 (sel_lo, sel_hi),
@@ -2937,6 +3022,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
+                &mem_byte_bits,
                 &offset_bits,
                 &byte_bits,
                 (sel_lo, sel_hi),
@@ -3014,6 +3100,8 @@ mod tests {
             M31::new(mem_halves_u32[0]),
             M31::new(mem_halves_u32[1]),
         ];
+        let mem_half_bits: [[M31; 16]; 2] =
+            std::array::from_fn(|i| u16_bits_m31(mem_halves_u32[i]));
 
         // Case 1: Load half 0 (0xF678) - Negative
         {
@@ -3034,6 +3122,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
+                &mem_half_bits,
                 &half_bits,
             );
             
@@ -3060,6 +3149,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
+                &mem_half_bits,
                 &half_bits,
             );
             
@@ -3091,6 +3181,8 @@ mod tests {
             M31::new(mem_bytes_u32[2]),
             M31::new(mem_bytes_u32[3]),
         ];
+        let mem_byte_bits: [[M31; 8]; 4] =
+            std::array::from_fn(|i| u8_bits_m31(mem_bytes_u32[i]));
 
         // Case 1: Load byte 1 (0xF6) - Negative byte but Unsigned Load
         {
@@ -3112,6 +3204,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_bytes,
+                &mem_byte_bits,
                 &offset_bits,
                 &byte_bits,
                 (sel_lo, sel_hi),
@@ -3155,6 +3248,9 @@ mod tests {
             M31::new(old_bytes_u32[2]),
             M31::new(old_bytes_u32[3]),
         ];
+        let old_mem_byte_bits: [[M31; 8]; 4] =
+            std::array::from_fn(|i| u8_bits_m31(old_bytes_u32[i]));
+        let byte_to_store_bits = u8_bits_m31(byte_to_store_val);
 
         let offset_bits = [M31::ONE, M31::ZERO]; // 1 = 1 + 2*0
         
@@ -3165,8 +3261,10 @@ mod tests {
             old_val,
             new_val,
             byte_to_store,
+            &byte_to_store_bits,
             M31::new(offset_val),
             &old_mem_bytes,
+            &old_mem_byte_bits,
             &offset_bits,
             witness_old_byte,
             witness_scale,
@@ -3205,6 +3303,9 @@ mod tests {
             M31::new(old_halves_u32[0]),
             M31::new(old_halves_u32[1]),
         ];
+        let old_mem_half_bits: [[M31; 16]; 2] =
+            std::array::from_fn(|i| u16_bits_m31(old_halves_u32[i]));
+        let half_to_store_bits = u16_bits_m31(half_to_store_val);
         
         let witness_old_half = old_mem_halves[1]; // 0x1234
 
@@ -3212,8 +3313,10 @@ mod tests {
             old_val,
             new_val,
             half_to_store,
+            &half_to_store_bits,
             M31::new(offset_val),
             &old_mem_halves,
+            &old_mem_half_bits,
             witness_old_half,
         );
 
@@ -3239,6 +3342,8 @@ mod tests {
             M31::new(mem_halves_u32[0]),
             M31::new(mem_halves_u32[1]),
         ];
+        let mem_half_bits: [[M31; 16]; 2] =
+            std::array::from_fn(|i| u16_bits_m31(mem_halves_u32[i]));
 
         // Case 1: Load half 0 (0xF678) - Negative if signed, but here Unsigned
         {
@@ -3259,6 +3364,7 @@ mod tests {
                 M31::new(offset_val),
                 rd_lo, rd_hi,
                 &mem_halves,
+                &mem_half_bits,
                 &half_bits,
             );
             
