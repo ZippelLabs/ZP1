@@ -362,9 +362,21 @@ impl StarkProver {
         self.channel.absorb_felt(ood_values.composition_at_z);
 
         // ===== Phase 4: DEEP Quotient and FRI =====
-        // Build DEEP quotient polynomial
-        let deep_quotient =
-            self.build_deep_quotient(&trace_lde, &composition_evals, &ood_values, oods_point);
+        // Squeeze DEEP combination alphas from transcript (one per trace column + composition)
+        // This MUST happen after absorbing OOD values and match the verifier's transcript order.
+        let num_deep_terms = trace_lde.num_columns() + 1;
+        let deep_alphas: Vec<M31> = (0..num_deep_terms)
+            .map(|_| self.channel.squeeze_challenge())
+            .collect();
+
+        // Build DEEP quotient polynomial using transcript-derived alphas
+        let deep_quotient = self.build_deep_quotient(
+            &trace_lde,
+            &composition_evals,
+            &ood_values,
+            oods_point,
+            &deep_alphas,
+        );
 
         // FRI commitment
         let fri_config = FriConfig {
@@ -398,23 +410,32 @@ impl StarkProver {
             query_proofs,
         }
     }
-    /// Build Merkle tree for trace, committing to ALL columns via interleaving.
+    /// Build Merkle tree for trace, committing to ALL columns via per-row hashing.
     ///
-    /// Interleaves columns as: [col0[0], col1[0], ..., col0[1], col1[1], ...]
-    /// This ensures all columns are bound to the commitment (critical for soundness).
+    /// Each leaf is a Blake3 hash of all column values at that row, so the
+    /// commitment binds every column (critical for soundness).  A single
+    /// Merkle proof per queried row then authenticates all trace values at
+    /// that row.
     fn build_trace_merkle_tree(&self, trace_lde: &TraceLDE) -> MerkleTree {
+        use blake3::Hasher as Blake3Hasher;
+
         let domain_size = trace_lde.domain_size();
         let num_cols = trace_lde.num_columns();
 
-        // Interleave all columns for commitment
-        let mut interleaved = Vec::with_capacity(domain_size * num_cols);
-        for row in 0..domain_size {
-            for col in 0..num_cols {
-                interleaved.push(trace_lde.get(col, row));
-            }
-        }
+        // Hash each row into a single leaf
+        let row_hashes: Vec<[u8; 32]> = (0..domain_size)
+            .map(|row| {
+                let mut h = Blake3Hasher::new();
+                // Domain prefix distinguishes trace row hashes from other Blake3 uses
+                h.update(b"zp1-trace-row");
+                for col in 0..num_cols {
+                    h.update(&trace_lde.get(col, row).as_u32().to_le_bytes());
+                }
+                *h.finalize().as_bytes()
+            })
+            .collect();
 
-        MerkleTree::new(&interleaved)
+        MerkleTree::from_leaf_hashes(row_hashes)
     }
 
     /// Squeeze random coefficients for combining constraints.
@@ -696,14 +717,9 @@ impl StarkProver {
         composition_evals: &[M31],
         ood_values: &OodValues,
         z: QM31,
+        deep_alphas: &[M31],
     ) -> Vec<M31> {
         let domain_size = trace_lde.domain_size();
-
-        // Get DEEP combination alphas
-        let num_terms = trace_lde.num_columns() + 1; // trace columns + composition
-        let deep_alphas: Vec<M31> = (0..num_terms)
-            .map(|i| M31::new((i as u32 + 1) * 7919)) // Deterministic for testing
-            .collect();
 
         let mut quotient = vec![M31::ZERO; domain_size];
 

@@ -16,6 +16,7 @@ zp1-trace = { workspace = true }
 zp1-air = { workspace = true }
 sha2 = { workspace = true }
 blake3 = { workspace = true }
+rand = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -29,7 +30,6 @@ metal = { version = "0.28", optional = true }
 objc = "0.2"
 
 [dev-dependencies]
-rand = { workspace = true }
 criterion = "0.5"
 
 [[bench]]
