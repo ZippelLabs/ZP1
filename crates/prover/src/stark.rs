@@ -84,6 +84,12 @@ use crate::{
 use zp1_primitives::{M31, QM31, CirclePoint};
 use zp1_air::{CpuTraceRow, ConstraintEvaluator as AirConstraintEvaluator};
 
+fn constraint_alpha_count() -> usize {
+    // Four explicit boundary constraints, all intra-row AIR constraints, and
+    // one inter-row PC consistency constraint.
+    4 + AirConstraintEvaluator::evaluate_all(&CpuTraceRow::default()).len() + 1
+}
+
 /// Configuration for the STARK prover.
 #[derive(Clone, Debug)]
 pub struct StarkConfig {
@@ -424,9 +430,8 @@ impl StarkProver {
     }
     
     /// Squeeze random coefficients for combining constraints.
-    fn squeeze_constraint_alphas(&mut self, num_cols: usize) -> Vec<M31> {
-        // Generate enough alphas for boundary + transition constraints
-        let num_constraints = num_cols * 2; // boundary + transition per column
+    fn squeeze_constraint_alphas(&mut self, _num_cols: usize) -> Vec<M31> {
+        let num_constraints = constraint_alpha_count();
         (0..num_constraints)
             .map(|_| self.channel.squeeze_challenge())
             .collect()
@@ -854,9 +859,8 @@ impl StarkVerifier {
         // Absorb trace commitment
         channel.absorb(&proof.trace_commitment);
         
-        // Get constraint alphas (must match prover - use same count as num_cols * 2)
-        let num_cols = proof.ood_values.trace_at_z.len();
-        let _constraint_alphas: Vec<M31> = (0..num_cols * 2)
+        // Get constraint alphas (must match prover).
+        let _constraint_alphas: Vec<M31> = (0..constraint_alpha_count())
             .map(|_| channel.squeeze_challenge())
             .collect();
         

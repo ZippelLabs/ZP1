@@ -8,6 +8,10 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion, Benchmark
 use zp1_primitives::M31;
 use zp1_air::rv32im::{CpuTraceRow, ConstraintEvaluator};
 
+fn sum_constraints(constraints: Vec<M31>) -> M31 {
+    constraints.into_iter().fold(M31::ZERO, |acc, c| acc + c)
+}
+
 /// Create a test row for bitwise AND operation.
 fn create_and_row() -> CpuTraceRow {
     let mut row = CpuTraceRow::default();
@@ -107,7 +111,7 @@ fn bench_and_bit_based(c: &mut Criterion) {
     let row = create_and_row();
     
     c.bench_function("AND_bit_based", |b| {
-        b.iter(|| ConstraintEvaluator::and_constraint(black_box(&row)))
+        b.iter(|| sum_constraints(ConstraintEvaluator::and_constraint(black_box(&row))))
     });
 }
 
@@ -123,7 +127,7 @@ fn bench_xor_bit_based(c: &mut Criterion) {
     let row = create_xor_row();
     
     c.bench_function("XOR_bit_based", |b| {
-        b.iter(|| ConstraintEvaluator::xor_constraint(black_box(&row)))
+        b.iter(|| sum_constraints(ConstraintEvaluator::xor_constraint(black_box(&row))))
     });
 }
 
@@ -142,7 +146,7 @@ fn bench_bitwise_comparison(c: &mut Criterion) {
     let xor_row = create_xor_row();
     
     group.bench_function("AND/bit_based", |b| {
-        b.iter(|| ConstraintEvaluator::and_constraint(black_box(&and_row)))
+        b.iter(|| sum_constraints(ConstraintEvaluator::and_constraint(black_box(&and_row))))
     });
     
     group.bench_function("AND/lookup_based", |b| {
@@ -150,7 +154,7 @@ fn bench_bitwise_comparison(c: &mut Criterion) {
     });
     
     group.bench_function("XOR/bit_based", |b| {
-        b.iter(|| ConstraintEvaluator::xor_constraint(black_box(&xor_row)))
+        b.iter(|| sum_constraints(ConstraintEvaluator::xor_constraint(black_box(&xor_row))))
     });
     
     group.bench_function("XOR/lookup_based", |b| {
@@ -174,7 +178,7 @@ fn bench_batch_evaluation(c: &mut Criterion) {
                 b.iter(|| {
                     let mut sum = M31::ZERO;
                     for row in rows.iter() {
-                        sum = sum + ConstraintEvaluator::and_constraint(black_box(row));
+                        sum = sum + sum_constraints(ConstraintEvaluator::and_constraint(black_box(row)));
                     }
                     sum
                 })
