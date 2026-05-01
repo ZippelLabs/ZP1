@@ -12,9 +12,9 @@ Recovers an Ethereum address from:
 
 | Implementation | Cycles | Trace Rows |
 |----------------|---------|------------|
-| Pure RISC-V | ~10,000,000 | ~10M |
+| Estimated Pure RISC-V | ~10,000,000 | ~10M |
 | Delegated | ~200 | ~100 |
-| **Speedup** | **50,000x** | **100,000x** |
+| **Reduction** | **~50,000x** | **~100,000x** |
 
 ## EIP-155 Support
 
@@ -27,14 +27,12 @@ The implementation supports:
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary ecrecover.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove ecrecover examples/ecrecover/ecrecover.bin
+cargo run --release -- prove --bin ecrecover
 ```
 
 ## Use Cases

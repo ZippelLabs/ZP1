@@ -15,26 +15,24 @@ Demonstrates ZP1's accelerated Keccak-256 precompile using delegation.
 
 ## Performance
 
-- **Pure RISC-V**: ~10,000,000 cycles
+- **Estimated Pure RISC-V**: ~10,000,000 cycles
 - **With Delegation**: ~100 trace rows
-- **Speedup**: ~100,000x
+- **Trace Reduction**: ~100,000x (estimated)
 
 ## Building
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary keccak.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove keccak examples/keccak/keccak.bin
+cargo run --release -- prove --bin keccak
 ```
 
 This demonstrates:
 - Syscall interface usage
 - Keccak-256 delegation
-- Massive performance improvement vs pure RISC-V
-- ~100,000x speedup for cryptographic operations
+- Compact trace representation vs estimated pure RISC-V
+- Efficient cryptographic precompile execution

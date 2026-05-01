@@ -15,22 +15,20 @@ Demonstrates ZP1's accelerated SHA-256 precompile.
 
 | Implementation | Cycles | Trace Rows |
 |----------------|---------|------------|
-| Pure RISC-V | ~8,000,000 | ~8M |
+| Estimated Pure RISC-V | ~8,000,000 | ~8M |
 | Delegated | ~200 | ~80 |
-| **Speedup** | **40,000x** | **100,000x** |
+| **Reduction** | **~40,000x** | **~100,000x** |
 
 ## Building
 
 ```bash
 cargo build --release --target riscv32im-unknown-none-elf
-cargo objcopy --release -- -O binary sha256.bin
 ```
 
 ## Testing
 
 ```bash
-cd /Users/zippellabs/Developer/zp1
-cargo run --release -- prove sha256 examples/sha256/sha256.bin
+cargo run --release -- prove --bin sha256
 ```
 
 This demonstrates:
