@@ -12,7 +12,7 @@ impl MemoryAir {
     /// where fingerprint = α³·addr + α²·value + α·timestamp + is_write
     ///
     /// This constraint checks the running sum increment is correct.
-    /// 
+    ///
     /// # Arguments
     /// * `addr` - Memory address
     /// * `value` - Memory value (32-bit)
@@ -22,7 +22,7 @@ impl MemoryAir {
     /// * `curr_sum` - Running sum at current row
     /// * `alpha` - Challenge for fingerprint combination
     /// * `beta` - Challenge for denominator shift
-    /// 
+    ///
     /// # Returns
     /// Constraint: (fingerprint + beta) * (curr_sum - prev_sum) - 1 = 0
     #[inline]
@@ -40,7 +40,7 @@ impl MemoryAir {
         let alpha2 = alpha * alpha;
         let alpha3 = alpha2 * alpha;
         let fingerprint = alpha3 * addr + alpha2 * value + alpha * timestamp + is_write;
-        
+
         // LogUp increment: 1/(fingerprint + beta)
         // Constraint: (fingerprint + beta) * (curr_sum - prev_sum) = 1
         // Rearranged: (fingerprint + beta) * (curr_sum - prev_sum) - 1 = 0
@@ -56,11 +56,11 @@ impl MemoryAir {
         // Check 4-byte alignment: addr % 4 == 0
         // In M31 field: compute addr_lo mod 4
         // We extract bottom 2 bits by: addr_lo - 4 * floor(addr_lo / 4)
-        
+
         let four = M31::new(4);
         let quotient = M31::new(addr_lo.as_u32() / 4);  // Integer division
         let remainder = addr_lo - quotient * four;       // addr_lo % 4
-        
+
         // Constraint: when is_word = 1, remainder must be 0
         // If remainder != 0, constraint is non-zero → proof fails
         is_word * remainder

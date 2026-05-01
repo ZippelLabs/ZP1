@@ -81,7 +81,7 @@ grep -rn "// TODO" crates/
 # Find placeholders
 grep -rn "placeholder" crates/
 
-# Find stubs  
+# Find stubs
 grep -rn "stub" crates/
 ```
 

@@ -174,7 +174,7 @@ Keccak-256(tx_data) → ECRECOVER(hash, signature)
 ### Trace Size Comparison (Estimated)
 
 | Operation    | Delegated Trace | Estimated Pure RISC-V Trace |
-|--------------|-----------------|-----------------------------|   
+|--------------|-----------------|-----------------------------|
 | SHA-256      | ~10 KB          | ~500 MB                     |
 | ECRECOVER    | ~10 KB          | ~1 GB                       |
 | Blake2b      | ~12 KB          | ~600 MB                     |## Proof Generation Impact (Theoretical)
